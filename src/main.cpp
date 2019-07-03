@@ -13,9 +13,62 @@ const int pin_touch = T4;
 
 SSD1306 display(oled_address, pin_oled_sda, pin_oled_sdl);
 
+
+class Button {
+public:
+  int32_t pin = -1;
+  uint32_t press_count = 0;
+  uint32_t click_count = 0;
+  unsigned long down_since_ms = 0;
+  bool last_reading_down = false;
+  bool is_touched = false;
+  bool is_pressed = false;
+  uint16_t touch_value = 0;
+
+  const uint16_t min_press_ms = 500;
+
+  void init(int32_t pin) {
+    this->pin = pin;
+    pinMode(pin, INPUT);
+    press_count = 0;
+    click_count = 0;
+    down_since_ms = 0;
+    is_touched = false;
+    is_pressed = false;
+  }
+
+  void execute() {
+    auto ms = millis();
+    if(pin<0) {
+      return;
+    }
+    touch_value = touchRead(pin);
+    bool new_touched = touch_value < 140 ? true : false;
+    if(new_touched) {
+      if(!is_touched) {
+        down_since_ms = ms;
+        is_touched = true;
+      } else {
+        if(!is_pressed && ms - down_since_ms > min_press_ms) {
+          is_pressed = true;
+          ++press_count;
+        }
+      }
+    } else {
+      if(is_pressed) {
+        is_pressed = false;
+        ++click_count;
+      }
+      is_touched = false;
+    }
+  }
+};
+
+Button button;
+
 void setup() {
   Serial.begin(115200);
-  pinMode(pin_touch, INPUT);
+  button.init(pin_touch);
   pinMode(pin_oled_rst, OUTPUT);
   digitalWrite(pin_oled_rst, LOW);
   delay(10);
@@ -51,18 +104,16 @@ void control_robot(float sp_x, float sp_v, float sp_a, float height) {
 
 void loop() {
   static uint32_t loop_count = 0;
-  static uint32_t touch_count = 0;
+  button.execute();
 
   display.clear();
-  int touch_value = touchRead(pin_touch);
-  if(touch_value < 147) {
-    ++touch_count;
-  }
-  display.drawString(0,0,String(touch_value));
-  display.drawString(0,10,String(touch_count));
-  display.drawString(0,20,String(loop_count));
+
+  display.drawString(0,0,String(button.touch_value));
+  display.drawString(0,10,String(button.press_count));
+  display.drawString(0,20,String(button.click_count));
+  display.drawString(0,30,String(loop_count));
   display.display();
   ++loop_count;
-  delay(100);
+  delay(10);
   // put your main code here, to run repeatedly:
 }
