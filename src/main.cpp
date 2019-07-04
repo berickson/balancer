@@ -25,7 +25,7 @@ public:
   bool is_pressed = false;
   uint16_t touch_value = 0;
 
-  const uint16_t min_press_ms = 500;
+  const uint16_t min_press_ms = 100;
 
   void init(int32_t pin) {
     this->pin = pin;
