@@ -2,6 +2,7 @@
 #include "SSD1306.h"
 #include "OLEDDisplay.h"
 #include "math.h"
+#include "BluetoothSerial.h"
 
 // board at https://www.amazon.com/gp/product/B07DKD79Y9
 const int oled_address=0x3c;
@@ -64,11 +65,47 @@ public:
   }
 };
 
+
+class LineReader {
+  public:
+  const uint32_t buffer_size = 500;
+  String buffer;
+  String line;
+  BluetoothSerial bluetooth;
+  bool line_available = true;
+
+  LineReader() {
+    buffer.reserve(buffer_size);
+    line.reserve(buffer_size);
+  }
+
+  bool get_line(Stream & stream) {
+    while(stream.available()) {
+      char c = (char)stream.read();
+      if(c=='\n' || c== '\r') {
+        if(buffer.length() > 0) {
+          line = buffer;
+          buffer = "";
+          return true;
+        }
+      } else {
+        buffer.concat(c);
+      }
+    }
+    return false;
+  }
+  
+};
+
+// globals
 Button button;
+const uint32_t bluetooth_buffer_reserve = 500;
+BluetoothSerial bluetooth;
 
 void setup() {
   Serial.begin(115200);
   button.init(pin_touch);
+  bluetooth.begin("bke");
   pinMode(pin_oled_rst, OUTPUT);
   digitalWrite(pin_oled_rst, LOW);
   delay(10);
@@ -78,8 +115,6 @@ void setup() {
   display.init();
   display.println("Setup complete");
   display.display();
-
-
   // put your setup code here, to run once:
 }
 
@@ -104,14 +139,21 @@ void control_robot(float sp_x, float sp_v, float sp_a, float height) {
 
 void loop() {
   static uint32_t loop_count = 0;
+  static LineReader line_reader;
+  static String last_bluetooth_line;
   button.execute();
+
+  if(line_reader.get_line(bluetooth)) {
+    last_bluetooth_line = line_reader.line;
+  }
 
   display.clear();
 
-  display.drawString(0,0,String(button.touch_value));
-  display.drawString(0,10,String(button.press_count));
-  display.drawString(0,20,String(button.click_count));
-  display.drawString(0,30,String(loop_count));
+  display.drawString(0, 0, String(button.touch_value));
+  display.drawString(0, 10, String(button.press_count));
+  display.drawString(0, 20, String(button.click_count));
+  display.drawString(0, 30, String(loop_count));
+  display.drawString(0, 40, last_bluetooth_line);
   display.display();
   ++loop_count;
   delay(10);
