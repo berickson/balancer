@@ -136,26 +136,37 @@ void control_robot(float sp_x, float sp_v, float sp_a, float height) {
   // last_angle = angle
   // last_wheel_osition = wheel_position
 }
+bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long ms) {
+  return (last_loop_ms % ms) + (loop_ms - last_loop_ms) >= ms;
+}
 
 void loop() {
   static uint32_t loop_count = 0;
   static LineReader line_reader;
   static String last_bluetooth_line;
-  button.execute();
+  static unsigned long last_loop_ms = 0;
+  unsigned long loop_ms = millis();
 
-  if(line_reader.get_line(bluetooth)) {
-    last_bluetooth_line = line_reader.line;
+  if(every_n_ms(loop_ms, last_loop_ms, 1)) {
+    // read the button
+    button.execute();
+
+    // check for a new line in bluetooth
+    if(line_reader.get_line(bluetooth)) {
+      last_bluetooth_line = line_reader.line;
+    }
   }
 
-  display.clear();
-
-  display.drawString(0, 0, String(button.touch_value));
-  display.drawString(0, 10, String(button.press_count));
-  display.drawString(0, 20, String(button.click_count));
-  display.drawString(0, 30, String(loop_count));
-  display.drawString(0, 40, last_bluetooth_line);
-  display.display();
+  if(every_n_ms(loop_ms, last_loop_ms, 10)) {
+    display.clear();
+    display.drawString(0, 0, "touch_value: " + String(button.touch_value));
+    display.drawString(0, 10, "press_count: " + String(button.press_count));
+    display.drawString(0, 20, "click_count: "+String(button.click_count));
+    display.drawString(0, 30, "loop_count: " + String(loop_count/1000)+String("k "));
+    display.drawString(0, 40, last_bluetooth_line);
+    display.display();
+  }
   ++loop_count;
-  delay(10);
+  last_loop_ms = loop_ms;
   // put your main code here, to run repeatedly:
 }
