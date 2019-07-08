@@ -1,8 +1,16 @@
 #include <Arduino.h>
+
+#include "I2Cdev.h"
+#include "MPU6050.h"
+
+
 #include "SSD1306.h"
 #include "OLEDDisplay.h"
 #include "math.h"
 #include "BluetoothSerial.h"
+
+
+
 
 // board at https://www.amazon.com/gp/product/B07DKD79Y9
 const int oled_address=0x3c;
@@ -101,8 +109,11 @@ class LineReader {
 Button button;
 const uint32_t bluetooth_buffer_reserve = 500;
 BluetoothSerial bluetooth;
+MPU6050 mpu;
 
 void setup() {
+
+
   Serial.begin(115200);
   button.init(pin_touch);
   bluetooth.begin("bke");
@@ -112,7 +123,22 @@ void setup() {
   digitalWrite(pin_oled_rst, HIGH);
   delay(100);
 
+  // init display before mpu since it initializes shared i2c
   display.init();
+
+  Serial.println("Initializing I2C devices...");
+  mpu.initialize();
+
+  // verify connection
+  Serial.println("Testing device connections...");
+  Serial.println(mpu.testConnection() ? "MPU6050 connection successful" : "MPU6050 connection failed");
+  mpu.reset();
+  delayMicroseconds(50000);
+  mpu.setSleepEnabled(false);
+  mpu.setTempSensorEnabled(true);
+  mpu.setFullScaleAccelRange(0);
+    
+
   display.println("Setup complete");
   display.display();
   // put your setup code here, to run once:
@@ -157,13 +183,26 @@ void loop() {
     }
   }
 
-  if(every_n_ms(loop_ms, last_loop_ms, 10)) {
+  if(every_n_ms(loop_ms, last_loop_ms, 100)) {
     display.clear();
-    display.drawString(0, 0, "touch_value: " + String(button.touch_value));
-    display.drawString(0, 10, "press_count: " + String(button.press_count));
-    display.drawString(0, 20, "click_count: "+String(button.click_count));
-    display.drawString(0, 30, "loop_count: " + String(loop_count/1000)+String("k "));
-    display.drawString(0, 40, last_bluetooth_line);
+    // display.drawString(0, 0, "touch_value: " + String(button.touch_value));
+    // display.drawString(0, 10, "press_count: " + String(button.press_count));
+    // display.drawString(0, 20, "click_count: "+String(button.click_count));
+    // display.drawString(0, 30, "loop_count: " + String(loop_count/1000)+String("k "));
+    // display.drawString(0, 40, last_bluetooth_line);
+
+
+    int16_t t_raw, ax_raw, ay_raw, az_raw, gx, gy, gz;
+    t_raw = mpu.getTemperature();
+    float t = float(t_raw)/340.+36.53;
+    mpu.getMotion6(&ax_raw, &ay_raw, &az_raw, &gx, &gy, &gz);
+    float ax = ax_raw / 16200.0;
+    float ay = ay_raw / 16700.0;
+    float az = az_raw / 14800.0;
+
+    display.drawString(0, 0, String("t:")+String(t));
+    display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
+    display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
     display.display();
   }
   ++loop_count;
