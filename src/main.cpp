@@ -20,11 +20,16 @@ const int pin_oled_sda = 4;
 const int pin_oled_sdl = 15;
 const int pin_oled_rst = 16;
 
-const int pin_led = 25;
+const int pin_built_in__led = 25;
 
 const int pin_touch = T4;
 
 SSD1306 display(oled_address, pin_oled_sda, pin_oled_sdl);
+
+bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long ms) {
+  return (last_loop_ms % ms) + (loop_ms - last_loop_ms) >= ms;
+}
+
 
 
 class Button {
@@ -94,8 +99,9 @@ class LineReader {
   bool get_line(Stream & stream) {
     while(stream.available()) {
       char c = (char)stream.read();
-      if(c=='\n' || c== '\r') {
-        if(buffer.length() > 0) {
+      if(c=='\n') continue;
+      if(c== '\r') {
+        if(true){ //buffer.length() > 0) {
           line = buffer;
           buffer = "";
           return true;
@@ -109,76 +115,246 @@ class LineReader {
   
 };
 
+const int wifi_port = 80;
+const int wifi_max_clients = 1;
+WiFiServer server(wifi_port, wifi_max_clients);
+
+class WifiTask {
+public:
+  LineReader line_reader;
+  WiFiClient client;
+  unsigned long connect_start_ms = 0;
+  unsigned long last_execute_ms = 0;
+  unsigned long last_client_activity_ms = 0;
+
+  bool trace = false;
+  bool log_serial = true;
+
+  enum {
+    status_not_connected,
+    status_connecting,
+    status_awaiting_client,
+    status_awaiting_command,
+    status_awaiting_header
+  } current_state = status_not_connected;
+
+
+  void send_response() {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-type:text/html");
+    client.println();
+
+    // the content of the HTTP response follows the header:
+    client.print("The LED is ");
+    client.print(digitalRead(pin_built_in__led)?"ON":"OFF");
+    client.print("<br>");
+    client.print( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
+    client.print( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
+
+    // The HTTP response ends with another blank line:
+    client.println();
+  }
+
+  void execute() {
+    auto ms = millis();
+    auto wifi_status = WiFi.status();
+
+    switch (current_state) {
+      case status_not_connected:
+        connect_start_ms = ms;
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        current_state = status_connecting;
+        break;
+      
+      case status_connecting:
+        if(wifi_status == WL_CONNECT_FAILED) {
+          current_state = status_not_connected;
+          if(trace) Serial.println("connection failed");
+          current_state = status_not_connected;
+          break;
+        }
+        if (wifi_status == WL_CONNECTED) {
+          server.begin();
+          current_state = status_awaiting_client;
+          if(trace) Serial.print("connected, waiting for client");
+        } else {
+          if(every_n_ms(last_execute_ms, ms, 1000)) {
+            Serial.print(wifi_status);
+          }
+          if(ms - connect_start_ms > 5000) {
+            if(trace) Serial.print("coudln't connect, trying again");
+            WiFi.disconnect();
+            current_state = status_not_connected;
+            break;
+          }
+        }
+        break;
+      case status_awaiting_client:
+        if (wifi_status != WL_CONNECTED) {
+          current_state = status_not_connected;
+          break;
+        }
+         client = server.available();
+         if(client) {
+           last_client_activity_ms = ms;
+           current_state = status_awaiting_command;
+           if(trace) Serial.println("client connected, awaiting command");
+           break;
+         } else {
+          if(trace && every_n_ms(last_execute_ms, ms, 1000)) {
+            if(trace) Serial.print(".");
+          }
+        }
+        break;
+
+      // the first line is a command, something like "GET / HTTP/1.1" or "GET /favicon.ico HTTP/1.1"
+      case status_awaiting_command:
+        if(wifi_status != WL_CONNECTED) {
+          current_state = status_not_connected;
+          break;
+        }
+        if(!client) {
+          if(trace) Serial.println("Client disconnected");
+          client.stop();
+          current_state = status_awaiting_client;
+          break;
+        }
+
+        while(client.available()) {
+          last_client_activity_ms = ms;
+          if(line_reader.get_line(client)) {
+
+          // todo: put this custom logic somewhere else
+          if (line_reader.line.startsWith("GET /H ")) {
+            digitalWrite(pin_built_in__led, HIGH);               // GET /H turns the LED on
+          }
+          if (line_reader.line.startsWith("GET /L ")) {
+            digitalWrite(pin_built_in__led, LOW);                // GET /L turns the LED off
+          }            
+
+            if(log_serial) Serial.println(line_reader.line);
+            if(trace) Serial.println("reading header");
+            current_state = status_awaiting_header;
+            break;
+          }
+        }
+        break;
+
+      case status_awaiting_header:
+        if(wifi_status != WL_CONNECTED) {
+          current_state = status_not_connected;
+          break;
+        }
+        if(!client) {
+          if(trace) Serial.println("Client disconnected");
+          client.stop();
+          current_state = status_awaiting_client;
+          break;
+        }
+        while(client.available()) {
+          if(line_reader.get_line(client)) {
+            if(log_serial) Serial.println(line_reader.line);
+
+            // a blank line means that the header is done
+            if(line_reader.line.length()==0) {
+              if(trace) Serial.println("blank line found, sending response");
+              send_response();
+              client.stop();
+              current_state = status_awaiting_client;
+              break;
+            }
+            else {
+              if(trace) Serial.println("waiting for blank line");
+            }
+          }
+        }
+        break;
+
+
+      default:
+        Serial.println("invalid sate in WifiTask");
+    }
+    last_execute_ms = ms;
+  }
+
+};
+
 // globals
 Button button;
 const uint32_t bluetooth_buffer_reserve = 500;
 BluetoothSerial bluetooth;
 MPU6050 mpu;
-WiFiServer server(80);
+WifiTask wifi_task;
 
-void wifi_loop(){
- WiFiClient client = server.available();   // listen for incoming clients
- pinMode(25, OUTPUT);
 
-  if (client) {                             // if you get a client,
-    //Serial.println("New Client.");           // print a message out the serial port
-    String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected()) {            // loop while the client's connected
-      if (client.available()) {             // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        //Serial.write(c);                    // print it out the serial monitor
-        if (c == '\n') {                    // if the byte is a newline character
 
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println();
+// void wifi_loop(){
+//  WiFiClient client = server.available();   // listen for incoming clients
+//  pinMode(25, OUTPUT);
 
-            // the content of the HTTP response follows the header:
-            client.print("The LED is ");
-            client.print(digitalRead(pin_led)?"ON":"OFF");
-            client.print("<br>");
-            client.print( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
-            client.print( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
+//   if (client) {                             // if you get a client,
+//     Serial.println("New Client.");           // print a message out the serial port
+//     String currentLine = "";                // make a String to hold incoming data from the client
+//     while (client.connected()) {            // loop while the client's connected
+//       if (client.available()) {             // if there's bytes to read from the client,
+//         char c = client.read();             // read a byte, then
+//         //Serial.write(c);                    // print it out the serial monitor
+//         if (c == '\n') {                    // if the byte is a newline character
 
-            // The HTTP response ends with another blank line:
-            client.println();
-            // break out of the while loop:
-            break;
-          } else {    // if you got a newline, then clear currentLine:
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
+//           // if the current line is blank, you got two newline characters in a row.
+//           // that's the end of the client HTTP request, so send a response:
+//           if (currentLine.length() == 0) {
+//             // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
+//             // and a content-type so the client knows what's coming, then a blank line:
+//             client.println("HTTP/1.1 200 OK");
+//             client.println("Content-type:text/html");
+//             client.println();
 
-        // Check to see if the client request was "GET /H" or "GET /L":
-        if (currentLine.endsWith("GET /H")) {
-          digitalWrite(25, HIGH);               // GET /H turns the LED on
-        }
-        if (currentLine.endsWith("GET /L")) {
-          digitalWrite(25, LOW);                // GET /L turns the LED off
-        }
-      }
-    }
-    // close the connection:
-    client.stop();
-    //Serial.println("Client Disconnected.");
-  }
-}
+//             // the content of the HTTP response follows the header:
+//             client.print("The LED is ");
+//             client.print(digitalRead(pin_built_in__led)?"ON":"OFF");
+//             client.print("<br>");
+//             client.print( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
+//             client.print( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
+
+//             // The HTTP response ends with another blank line:
+//             client.println();
+//             // break out of the while loop:
+//             break;
+//           } else {    // if you got a newline, then clear currentLine:
+//             Serial.println("current_line: " + currentLine);
+//             currentLine = "";
+//           }
+//         } else if (c != '\r') {  // if you got anything else but a carriage return character,
+//           currentLine += c;      // add it to the end of the currentLine
+//         }
+
+        
+
+//         // Check to see if the client request was "GET /H" or "GET /L":
+//         if (currentLine.endsWith("GET /H")) {
+//           digitalWrite(25, HIGH);               // GET /H turns the LED on
+//         }
+//         if (currentLine.endsWith("GET /L")) {
+//           digitalWrite(25, LOW);                // GET /L turns the LED off
+//         }
+//       }
+//     }
+//     // close the connection:
+//     client.stop();
+//     Serial.println("Client Disconnected.");
+//   }
+// }
 
 void setup() {
 
 
-  Serial.begin(115200);
+  Serial.begin(921600);
   button.init(pin_touch);
   bluetooth.begin("bke");
   
   pinMode(pin_oled_rst, OUTPUT);
+  pinMode(pin_built_in__led, OUTPUT);
   digitalWrite(pin_oled_rst, LOW);
   delay(10);
   digitalWrite(pin_oled_rst, HIGH);
@@ -200,19 +376,19 @@ void setup() {
   mpu.setFullScaleAccelRange(0);
 
 
-  // Wifi
-  // see https://github.com/espressif/arduino-esp32/blob/master/libraries/WiFi/examples/SimpleWiFiServer/SimpleWiFiServer.ino
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
+  // // Wifi
+  // // see https://github.com/espressif/arduino-esp32/blob/master/libraries/WiFi/examples/SimpleWiFiServer/SimpleWiFiServer.ino
+  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   delay(500);
+  //   Serial.print(".");
+  // }
 
-  server.begin();
-  Serial.println("");
-  Serial.println("WiFi connected to ");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+  // server.begin();
+  // Serial.println("");
+  // Serial.println("WiFi connected to ");
+  // Serial.println("IP address: ");
+  // Serial.println(WiFi.localIP());
   
     
 
@@ -239,9 +415,6 @@ void control_robot(float sp_x, float sp_v, float sp_a, float height) {
   // last_angle = angle
   // last_wheel_osition = wheel_position
 }
-bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long ms) {
-  return (last_loop_ms % ms) + (loop_ms - last_loop_ms) >= ms;
-}
 
 void loop() {
   static uint32_t loop_count = 0;
@@ -250,9 +423,10 @@ void loop() {
   static unsigned long last_loop_ms = 0;
   unsigned long loop_ms = millis();
 
+  wifi_task.execute();
 
   if(every_n_ms(loop_ms, last_loop_ms, 1)) {
-    wifi_loop();
+  
     // read the button
     button.execute();
 
@@ -267,7 +441,7 @@ void loop() {
     // display.drawString(0, 0, "touch_value: " + String(button.touch_value));
     // display.drawString(0, 10, "press_count: " + String(button.press_count));
     // display.drawString(0, 20, "click_count: "+String(button.click_count));
-    // display.drawString(0, 30, "loop_count: " + String(loop_count/1000)+String("k "));
+    display.drawString(0, 20, "loop_count: " + String(loop_count/1000)+String("k "));
     // display.drawString(0, 40, last_bluetooth_line);
 
 
@@ -280,8 +454,8 @@ void loop() {
     float az = az_raw / 14800.0;
 
     display.drawString(0, 0, String("t:")+String(t));
-    display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
-    display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
+    //display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
+    //display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
     display.drawString(0, 30, WiFi.localIP().toString());
     display.drawString(0, 40, last_bluetooth_line);
     display.display();
