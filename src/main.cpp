@@ -10,6 +10,8 @@
 #include "BluetoothSerial.h"
 #include "WiFi.h"
 #include "secret.h"
+#include "functional"
+#include <vector>
 
 
 
@@ -25,6 +27,8 @@ const int pin_built_in__led = 25;
 const int pin_touch = T4;
 
 SSD1306 display(oled_address, pin_oled_sda, pin_oled_sdl);
+
+void empty_callback(){}
 
 bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long ms) {
   return (last_loop_ms % ms) + (loop_ms - last_loop_ms) >= ms;
@@ -119,6 +123,57 @@ const int wifi_port = 80;
 const int wifi_max_clients = 1;
 WiFiServer server(wifi_port, wifi_max_clients);
 
+struct HttpRoute {
+  String method;
+  String path;
+  std::function< void(WiFiClient & client) > execute;
+};
+
+void send_standard_header(WiFiClient & client) {
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-type:text/html");
+    client.println();
+}
+
+void send_standard_response(WiFiClient & client) {
+    send_standard_header(client);
+
+    // the content of the HTTP response follows the header:
+    client.println("The LED is ");
+    client.println(digitalRead(pin_built_in__led)?"ON":"OFF");
+    client.println("<br>");
+    client.println( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
+    client.println( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
+
+    // The HTTP response ends with another blank line:
+    client.println();
+}
+
+HttpRoute route_turn_on_light {"GET","/H", [](WiFiClient & client)->void{
+  digitalWrite(pin_built_in__led, HIGH);               // GET /H turns the LED on
+  send_standard_response(client);
+}};
+
+HttpRoute route_turn_off_light {"GET","/L", [](WiFiClient & client)->void{
+  digitalWrite(pin_built_in__led, LOW);               // GET /H turns the LED on
+  send_standard_response(client);
+}};
+
+HttpRoute route_home {"GET","/", [](WiFiClient & client)->void{
+  send_standard_response(client);
+}};
+
+HttpRoute route_sleep{"GET","/sleep", [](WiFiClient & client)->void{
+  esp_sleep_enable_touchpad_wakeup();
+  client.println("Going to sleep now. You can use the touch pin to wake up. Good night!");
+  client.println();
+  client.stop();
+  esp_deep_sleep_start();
+}};
+
+
+std::vector<HttpRoute> routes{route_home, route_turn_on_light, route_turn_off_light, route_sleep};
+
 class WifiTask {
 public:
   LineReader line_reader;
@@ -126,6 +181,11 @@ public:
   unsigned long connect_start_ms = 0;
   unsigned long last_execute_ms = 0;
   unsigned long last_client_activity_ms = 0;
+
+  String method="";  // GET, PUT, ETC.
+  String path="";    // URI
+  String version=""; // HTTP Version
+
 
   bool trace = false;
   bool log_serial = true;
@@ -139,17 +199,18 @@ public:
   } current_state = status_not_connected;
 
 
+
   void send_response() {
     client.println("HTTP/1.1 200 OK");
     client.println("Content-type:text/html");
     client.println();
 
     // the content of the HTTP response follows the header:
-    client.print("The LED is ");
-    client.print(digitalRead(pin_built_in__led)?"ON":"OFF");
-    client.print("<br>");
-    client.print( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
-    client.print( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
+    client.println("The LED is ");
+    client.println(digitalRead(pin_built_in__led)?"ON":"OFF");
+    client.println("<br>");
+    client.println( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
+    client.println( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
 
     // The HTTP response ends with another blank line:
     client.println();
@@ -158,6 +219,7 @@ public:
   void execute() {
     auto ms = millis();
     auto wifi_status = WiFi.status();
+
 
     switch (current_state) {
       case status_not_connected:
@@ -224,19 +286,37 @@ public:
           last_client_activity_ms = ms;
           if(line_reader.get_line(client)) {
 
-          // todo: put this custom logic somewhere else
-          if (line_reader.line.startsWith("GET /H ")) {
-            digitalWrite(pin_built_in__led, HIGH);               // GET /H turns the LED on
-          }
-          if (line_reader.line.startsWith("GET /L ")) {
-            digitalWrite(pin_built_in__led, LOW);                // GET /L turns the LED off
-          }            
+            // parse the command TODO: add error checking
+            String & l = line_reader.line;
+            int first_space = l.indexOf(" ");
+            int last_space = l.lastIndexOf(" ");
+            method = l.substring(0, first_space);
+            path = l.substring(first_space+1, last_space);
+            version = l.substring(last_space+1);
+
+            Serial.print("method: ");
+            Serial.println(method);
+            Serial.print("path: ");
+            Serial.println(path);
+            Serial.print("version: ");
+            Serial.println(version);
+
+
+
+            // todo: put this custom logic somewhere else
+            
+            // if (line_reader.line.startsWith("GET /H ")) {
+            //   digitalWrite(pin_built_in__led, HIGH);               // GET /H turns the LED on
+            // }
+            // if (line_reader.line.startsWith("GET /L ")) {
+            //   digitalWrite(pin_built_in__led, LOW);                // GET /L turns the LED off
+            // }            
 
             if(log_serial) Serial.println(line_reader.line);
             if(trace) Serial.println("reading header");
             current_state = status_awaiting_header;
             break;
-          }
+            }
         }
         break;
 
@@ -258,7 +338,24 @@ public:
             // a blank line means that the header is done
             if(line_reader.line.length()==0) {
               if(trace) Serial.println("blank line found, sending response");
-              send_response();
+
+              // send response from routes
+              bool found = false;
+              for(auto & route : routes) {
+                if(route.method == this->method && route.path == this->path) {
+                  found = true;
+                  route.execute(client);
+                  break;
+                }
+              }
+              if(!found) {
+                // send 404
+                Serial.println("route not found, 404");
+                client.println("HTTP/1.1 404 Not Found");
+                client.println();
+              }
+
+
               client.stop();
               current_state = status_awaiting_client;
               break;
@@ -375,22 +472,8 @@ void setup() {
   mpu.setTempSensorEnabled(true);
   mpu.setFullScaleAccelRange(0);
 
+  touchAttachInterrupt(pin_touch, empty_callback, 120);
 
-  // // Wifi
-  // // see https://github.com/espressif/arduino-esp32/blob/master/libraries/WiFi/examples/SimpleWiFiServer/SimpleWiFiServer.ino
-  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  // while (WiFi.status() != WL_CONNECTED) {
-  //   delay(500);
-  //   Serial.print(".");
-  // }
-
-  // server.begin();
-  // Serial.println("");
-  // Serial.println("WiFi connected to ");
-  // Serial.println("IP address: ");
-  // Serial.println(WiFi.localIP());
-  
-    
 
   display.println("Setup complete");
   display.display();
@@ -437,14 +520,6 @@ void loop() {
   }
 
   if(every_n_ms(loop_ms, last_loop_ms, 100)) {
-    display.clear();
-    // display.drawString(0, 0, "touch_value: " + String(button.touch_value));
-    // display.drawString(0, 10, "press_count: " + String(button.press_count));
-    // display.drawString(0, 20, "click_count: "+String(button.click_count));
-    display.drawString(0, 20, "loop_count: " + String(loop_count/1000)+String("k "));
-    // display.drawString(0, 40, last_bluetooth_line);
-
-
     int16_t t_raw, ax_raw, ay_raw, az_raw, gx, gy, gz;
     t_raw = mpu.getTemperature();
     float t = float(t_raw)/340.+36.53;
@@ -453,11 +528,16 @@ void loop() {
     float ay = ay_raw / 16700.0;
     float az = az_raw / 14800.0;
 
-    display.drawString(0, 0, String("t:")+String(t));
+    // display.drawString(0, 0, String("t:")+String(t));
     //display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
     //display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
-    display.drawString(0, 30, WiFi.localIP().toString());
-    display.drawString(0, 40, last_bluetooth_line);
+    display.clear();
+    display.drawString(0, 0, "touch_value: " + String(button.touch_value));
+    display.drawString(0, 10, "press_count: " + String(button.press_count));
+    display.drawString(0, 20, "click_count: "+String(button.click_count));
+    display.drawString(0, 30, "loop_count: " + String(loop_count/1000)+String("k "));
+    display.drawString(0, 40, WiFi.localIP().toString());
+    display.drawString(0, 50, last_bluetooth_line);
     display.display();
   }
   ++loop_count;
