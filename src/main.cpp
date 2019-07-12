@@ -3,7 +3,6 @@
 #include "I2Cdev.h"
 #include "MPU6050.h"
 
-
 #include "SSD1306.h"
 #include "OLEDDisplay.h"
 #include "math.h"
@@ -12,9 +11,6 @@
 #include "secret.h"
 #include "functional"
 #include <vector>
-
-
-
 
 // board at https://www.amazon.com/gp/product/B07DKD79Y9
 const int oled_address=0x3c;
@@ -199,23 +195,6 @@ public:
   } current_state = status_not_connected;
 
 
-
-  void send_response() {
-    client.println("HTTP/1.1 200 OK");
-    client.println("Content-type:text/html");
-    client.println();
-
-    // the content of the HTTP response follows the header:
-    client.println("The LED is ");
-    client.println(digitalRead(pin_built_in__led)?"ON":"OFF");
-    client.println("<br>");
-    client.println( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
-    client.println( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
-
-    // The HTTP response ends with another blank line:
-    client.println();
-  }
-
   void execute() {
     auto ms = millis();
     auto wifi_status = WiFi.status();
@@ -251,6 +230,7 @@ public:
           }
         }
         break;
+
       case status_awaiting_client:
         if (wifi_status != WL_CONNECTED) {
           current_state = status_not_connected;
@@ -301,16 +281,7 @@ public:
             Serial.print("version: ");
             Serial.println(version);
 
-
-
-            // todo: put this custom logic somewhere else
-            
-            // if (line_reader.line.startsWith("GET /H ")) {
-            //   digitalWrite(pin_built_in__led, HIGH);               // GET /H turns the LED on
-            // }
-            // if (line_reader.line.startsWith("GET /L ")) {
-            //   digitalWrite(pin_built_in__led, LOW);                // GET /L turns the LED off
-            // }            
+   
 
             if(log_serial) Serial.println(line_reader.line);
             if(trace) Serial.println("reading header");
@@ -350,8 +321,10 @@ public:
               }
               if(!found) {
                 // send 404
-                Serial.println("route not found, 404");
                 client.println("HTTP/1.1 404 Not Found");
+                client.println("Content-type:text/html");
+                client.println();
+                client.println("<html><head></head><body>route not found, 404<br></body></html>");
                 client.println();
               }
 
@@ -384,64 +357,6 @@ MPU6050 mpu;
 WifiTask wifi_task;
 
 
-
-// void wifi_loop(){
-//  WiFiClient client = server.available();   // listen for incoming clients
-//  pinMode(25, OUTPUT);
-
-//   if (client) {                             // if you get a client,
-//     Serial.println("New Client.");           // print a message out the serial port
-//     String currentLine = "";                // make a String to hold incoming data from the client
-//     while (client.connected()) {            // loop while the client's connected
-//       if (client.available()) {             // if there's bytes to read from the client,
-//         char c = client.read();             // read a byte, then
-//         //Serial.write(c);                    // print it out the serial monitor
-//         if (c == '\n') {                    // if the byte is a newline character
-
-//           // if the current line is blank, you got two newline characters in a row.
-//           // that's the end of the client HTTP request, so send a response:
-//           if (currentLine.length() == 0) {
-//             // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-//             // and a content-type so the client knows what's coming, then a blank line:
-//             client.println("HTTP/1.1 200 OK");
-//             client.println("Content-type:text/html");
-//             client.println();
-
-//             // the content of the HTTP response follows the header:
-//             client.print("The LED is ");
-//             client.print(digitalRead(pin_built_in__led)?"ON":"OFF");
-//             client.print("<br>");
-//             client.print( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
-//             client.print( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
-
-//             // The HTTP response ends with another blank line:
-//             client.println();
-//             // break out of the while loop:
-//             break;
-//           } else {    // if you got a newline, then clear currentLine:
-//             Serial.println("current_line: " + currentLine);
-//             currentLine = "";
-//           }
-//         } else if (c != '\r') {  // if you got anything else but a carriage return character,
-//           currentLine += c;      // add it to the end of the currentLine
-//         }
-
-        
-
-//         // Check to see if the client request was "GET /H" or "GET /L":
-//         if (currentLine.endsWith("GET /H")) {
-//           digitalWrite(25, HIGH);               // GET /H turns the LED on
-//         }
-//         if (currentLine.endsWith("GET /L")) {
-//           digitalWrite(25, LOW);                // GET /L turns the LED off
-//         }
-//       }
-//     }
-//     // close the connection:
-//     client.stop();
-//     Serial.println("Client Disconnected.");
-//   }
-// }
 
 void setup() {
 
