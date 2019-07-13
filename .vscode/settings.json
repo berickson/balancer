@@ -1,6 +1,14 @@
 {
     "terminal.integrated.env.linux": {
-        "PATH": "/home/brian/.platformio/penv/bin:/home/brian/.platformio/penv:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin",
+        "PATH": "/home/brian/.platformio/penv/bin:/home/brian/.platformio/penv:/home/brian/.local/bin:/opt/ros/melodic/bin:/home/brian/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/brian/.dotnet/tools:/home/brian/.dotnet/tools",
         "PLATFORMIO_CALLER": "vscode"
+    },
+    "files.associations": {
+        "array": "cpp",
+        "deque": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "initializer_list": "cpp",
+        "functional": "cpp"
     }
 }
