@@ -12,15 +12,34 @@
 #include "functional"
 #include <vector>
 
+#include "FunctionalInterrupt.h"
+#include "QuadratureEncoder.h"
+
 // board at https://www.amazon.com/gp/product/B07DKD79Y9
 const int oled_address=0x3c;
 const int pin_oled_sda = 4;
 const int pin_oled_sdl = 15;
 const int pin_oled_rst = 16;
 
+const int pin_left_a = 36;
+const int pin_left_b = 37;
+const int pin_right_b = 38;
+const int pin_right_a = 39;
+
+const int pin_right_cmd_fwd = 27;
+const int pin_right_cmd_rev = 14;
+
+const int pin_left_cmd_fwd = 26;
+const int pin_left_cmd_rev = 25;
+
 const int pin_built_in__led = 25;
 
 const int pin_touch = T4;
+
+const uint8_t left_cmd_fwd_pwm_channel = 0;
+const uint8_t left_cmd_rev_pwm_channel = 1;
+const uint8_t right_cmd_fwd_pwm_channel = 2;
+const uint8_t right_cmd_rev_pwm_channel = 3;
 
 SSD1306 display(oled_address, pin_oled_sda, pin_oled_sdl);
 
@@ -370,22 +389,74 @@ const uint32_t bluetooth_buffer_reserve = 500;
 BluetoothSerial bluetooth;
 MPU6050 mpu;
 WifiTask wifi_task;
+QuadratureEncoder left_encoder(pin_left_a, pin_left_b);
+QuadratureEncoder right_encoder(pin_right_a, pin_right_b);
 
+
+
+// which = 0 for left, 1 for right
+void set_motor_power(int which, float power) {
+  int channel_fwd = (which==0) ? left_cmd_fwd_pwm_channel : right_cmd_fwd_pwm_channel;
+  int channel_rev = (which==0) ? left_cmd_rev_pwm_channel : right_cmd_rev_pwm_channel;
+  int power_channel = (power>0) ? channel_fwd : channel_rev;
+  int zero_channel = (power>0) ? channel_rev : channel_fwd;
+  uint32_t duty = uint32_t(255*fabs(power));
+  Serial.println("set_motor_speed channel: "+String(channel_fwd) + "zero_channel: " + String(zero_channel) + " duty: " + String(duty));
+  ledcWrite(power_channel, duty);
+  digitalWrite(zero_channel, LOW);
+}
 
 
 void setup() {
-
-
   Serial.begin(921600);
   button.init(pin_touch);
   bluetooth.begin("bke");
+
+  left_encoder.init();
+  right_encoder.init();
   
   pinMode(pin_oled_rst, OUTPUT);
   pinMode(pin_built_in__led, OUTPUT);
+
+
+
+  pinMode(pin_left_cmd_fwd, OUTPUT);
+  pinMode(pin_left_cmd_rev, OUTPUT);
+  pinMode(pin_right_cmd_fwd, OUTPUT);
+  pinMode(pin_right_cmd_rev, OUTPUT);
+
+  digitalWrite(pin_left_cmd_fwd, LOW);
+  digitalWrite(pin_left_cmd_rev, LOW);
+  digitalWrite(pin_right_cmd_fwd, LOW);
+  digitalWrite(pin_right_cmd_rev, LOW);
+
+  const int pwm_frequency = 100;
+  const int pwm_bits = 8;
+
+  ledcSetup(left_cmd_fwd_pwm_channel, pwm_frequency, pwm_bits);
+  ledcAttachPin(pin_left_cmd_fwd, left_cmd_fwd_pwm_channel);
+
+  ledcSetup(left_cmd_rev_pwm_channel, pwm_frequency, pwm_bits);
+  ledcAttachPin(pin_left_cmd_rev, left_cmd_rev_pwm_channel);
+
+  ledcSetup(right_cmd_fwd_pwm_channel, pwm_frequency, pwm_bits);
+  ledcAttachPin(pin_right_cmd_fwd, right_cmd_fwd_pwm_channel);
+
+  ledcSetup(right_cmd_rev_pwm_channel, pwm_frequency, pwm_bits);
+  ledcAttachPin(pin_right_cmd_rev, right_cmd_rev_pwm_channel);
+
+  
+   for(auto x: {0,1}) {
+     set_motor_power(x,0);
+   }
+
+
   digitalWrite(pin_oled_rst, LOW);
   delay(10);
   digitalWrite(pin_oled_rst, HIGH);
   delay(100);
+
+
 
   // init display before mpu since it initializes shared i2c
   display.init();
@@ -406,6 +477,8 @@ void setup() {
   display.display();
   // put your setup code here, to run once:
 }
+
+
 
 float get_tilt_angle() {
   // TODO: read tilt angle from gyroscope
@@ -446,7 +519,7 @@ void loop() {
     }
   }
 
-  if(every_n_ms(loop_ms, last_loop_ms, 100)) {
+  if(every_n_ms(loop_ms, last_loop_ms, 10)) {
     int16_t t_raw, ax_raw, ay_raw, az_raw, gx, gy, gz;
     t_raw = mpu.getTemperature();
     float t = float(t_raw)/340.+36.53;
@@ -455,10 +528,16 @@ void loop() {
     float ay = ay_raw / 16700.0;
     float az = az_raw / 14800.0;
 
+
     display.clear();
-    display.drawString(0, 0, String("t:")+String(t));
-    display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
-    display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
+
+    display.drawString(0, 0, "la:"+String(left_encoder.odometer_a)+ " lb:"+String(left_encoder.odometer_b)+" ra:"+String(right_encoder.odometer_a)+" rb:"+String(right_encoder.odometer_b));
+
+
+    
+    //display.drawString(0, 0, String("t:")+String(t));
+    //display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
+    //display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
     //display.drawString(0, 0, "touch_value: " + String(button.touch_value));
     //display.drawString(0, 10, "press_count: " + String(button.press_count));
     //display.drawString(0, 20, "click_count: "+String(button.click_count));
