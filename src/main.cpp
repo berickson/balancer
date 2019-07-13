@@ -61,7 +61,7 @@ public:
       return;
     }
     touch_value = touchRead(pin);
-    bool new_touched = touch_value < 140 ? true : false;
+    bool new_touched = touch_value < 90 ? true : false;
     if(new_touched) {
       if(!is_touched) {
         down_since_ms = ms;
@@ -135,22 +135,35 @@ void send_standard_response(WiFiClient & client) {
     send_standard_header(client);
 
     // the content of the HTTP response follows the header:
+    client.println("<html><head><style>");
+    client.println("* {font-size:40pt;}");
+    client.println("</style></head><body>");
+    client.println("<script>");
+    client.println("function sleep() {");
+    client.println("var request = new XMLHttpRequest();");
+    client.println("request.open('PUT','/sleep');");
+    client.println("request.send();");
+    client.println("}");
+    client.println("</script>");
     client.println("The LED is ");
     client.println(digitalRead(pin_built_in__led)?"ON":"OFF");
-    client.println("<br>");
-    client.println( "Click <a href='/H'>here</a> to turn the LED on.<br>" );
-    client.println( "Click <a href='/L'>here</a> to turn the LED off.<br>" );
+    client.println("<br><br>");
+    client.println( "Click <a href='/led_on'>here</a> to turn the LED on.<br>" );
+    client.println( "Click <a href='/led_off'>here</a> to turn the LED off.<br>" );
+    client.println( "<br>" );
+    client.println("<button onclick='sleep()'>sleep</button>");
+    client.println("</body></html");
 
     // The HTTP response ends with another blank line:
     client.println();
 }
 
-HttpRoute route_turn_on_light {"GET","/H", [](WiFiClient & client)->void{
+HttpRoute route_turn_on_light {"GET","/led_on", [](WiFiClient & client)->void{
   digitalWrite(pin_built_in__led, HIGH);               // GET /H turns the LED on
   send_standard_response(client);
 }};
 
-HttpRoute route_turn_off_light {"GET","/L", [](WiFiClient & client)->void{
+HttpRoute route_turn_off_light {"GET","/led_off", [](WiFiClient & client)->void{
   digitalWrite(pin_built_in__led, LOW);               // GET /H turns the LED on
   send_standard_response(client);
 }};
@@ -159,7 +172,9 @@ HttpRoute route_home {"GET","/", [](WiFiClient & client)->void{
   send_standard_response(client);
 }};
 
-HttpRoute route_sleep{"GET","/sleep", [](WiFiClient & client)->void{
+
+HttpRoute route_sleep{"PUT","/sleep", [](WiFiClient & client)->void{
+  touchAttachInterrupt(pin_touch, empty_callback, 120);
   esp_sleep_enable_touchpad_wakeup();
   client.println("Going to sleep now. You can use the touch pin to wake up. Good night!");
   client.println();
@@ -387,9 +402,6 @@ void setup() {
   mpu.setTempSensorEnabled(true);
   mpu.setFullScaleAccelRange(0);
 
-  touchAttachInterrupt(pin_touch, empty_callback, 120);
-
-
   display.println("Setup complete");
   display.display();
   // put your setup code here, to run once:
@@ -443,13 +455,13 @@ void loop() {
     float ay = ay_raw / 16700.0;
     float az = az_raw / 14800.0;
 
-    // display.drawString(0, 0, String("t:")+String(t));
-    //display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
-    //display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
     display.clear();
-    display.drawString(0, 0, "touch_value: " + String(button.touch_value));
-    display.drawString(0, 10, "press_count: " + String(button.press_count));
-    display.drawString(0, 20, "click_count: "+String(button.click_count));
+    display.drawString(0, 0, String("t:")+String(t));
+    display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
+    display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
+    //display.drawString(0, 0, "touch_value: " + String(button.touch_value));
+    //display.drawString(0, 10, "press_count: " + String(button.press_count));
+    //display.drawString(0, 20, "click_count: "+String(button.click_count));
     display.drawString(0, 30, "loop_count: " + String(loop_count/1000)+String("k "));
     display.drawString(0, 40, WiFi.localIP().toString());
     display.drawString(0, 50, last_bluetooth_line);
