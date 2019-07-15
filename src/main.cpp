@@ -21,16 +21,16 @@ const int pin_oled_sda = 4;
 const int pin_oled_sdl = 15;
 const int pin_oled_rst = 16;
 
-const int pin_left_a = 36;
-const int pin_left_b = 37;
-const int pin_right_b = 38;
-const int pin_right_a = 39;
+const int pin_left_a = 27;
+const int pin_left_b = 14;
+const int pin_right_b = 12;
+const int pin_right_a = 13;
 
-const int pin_right_cmd_fwd = 27;
-const int pin_right_cmd_rev = 14;
+const int pin_right_cmd_rev = 23;
+const int pin_right_cmd_fwd = 19;
 
-const int pin_left_cmd_fwd = 26;
-const int pin_left_cmd_rev = 25;
+const int pin_left_cmd_fwd = 22;
+const int pin_left_cmd_rev = 21;
 
 const int pin_built_in__led = 25;
 
@@ -253,9 +253,9 @@ public:
           current_state = status_awaiting_client;
           if(trace) Serial.print("connected, waiting for client");
         } else {
-          if(every_n_ms(last_execute_ms, ms, 1000)) {
-            Serial.print(wifi_status);
-          }
+          // if(every_n_ms(last_execute_ms, ms, 1000)) {
+          //   Serial.print(wifi_status);
+          // }
           if(ms - connect_start_ms > 5000) {
             if(trace) Serial.print("coudln't connect, trying again");
             WiFi.disconnect();
@@ -406,19 +406,32 @@ void set_motor_power(int which, float power) {
   digitalWrite(zero_channel, LOW);
 }
 
+void left_a_changed(){
+  left_encoder.sensor_a_changed();
+}
+void left_b_changed(){
+  left_encoder.sensor_b_changed();
+}
+
+void right_a_changed(){
+  right_encoder.sensor_a_changed();
+}
+
+void right_b_changed(){
+  right_encoder.sensor_b_changed();
+}
+
 
 void setup() {
-  Serial.begin(921600);
-  button.init(pin_touch);
+  Serial.begin(115200);
+  // button.init(pin_touch);
   bluetooth.begin("bke");
 
   left_encoder.init();
   right_encoder.init();
-  
+
   pinMode(pin_oled_rst, OUTPUT);
   pinMode(pin_built_in__led, OUTPUT);
-
-
 
   pinMode(pin_left_cmd_fwd, OUTPUT);
   pinMode(pin_left_cmd_rev, OUTPUT);
@@ -447,7 +460,7 @@ void setup() {
 
   
    for(auto x: {0,1}) {
-     set_motor_power(x,0);
+     set_motor_power(x,1);
    }
 
 
@@ -506,9 +519,9 @@ void loop() {
   static unsigned long last_loop_ms = 0;
   unsigned long loop_ms = millis();
 
-  wifi_task.execute();
 
   if(every_n_ms(loop_ms, last_loop_ms, 1)) {
+   wifi_task.execute();
   
     // read the button
     button.execute();
@@ -517,6 +530,11 @@ void loop() {
     if(line_reader.get_line(bluetooth)) {
       last_bluetooth_line = line_reader.line;
     }
+  }
+
+  if(every_n_ms(loop_ms, last_loop_ms, 500)) {
+    Serial.println(String("left Direction changes: ") + left_encoder.direction_change_count);
+    Serial.println(String("extra interrupts left: ") + left_encoder.extra_interrupts_count);
   }
 
   if(every_n_ms(loop_ms, last_loop_ms, 10)) {
@@ -535,9 +553,9 @@ void loop() {
 
 
     
-    //display.drawString(0, 0, String("t:")+String(t));
-    //display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
-    //display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
+    // display.drawString(0, 0, String("t:")+String(t));
+    display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
+    display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
     //display.drawString(0, 0, "touch_value: " + String(button.touch_value));
     //display.drawString(0, 10, "press_count: " + String(button.press_count));
     //display.drawString(0, 20, "click_count: "+String(button.click_count));
@@ -548,5 +566,4 @@ void loop() {
   }
   ++loop_count;
   last_loop_ms = loop_ms;
-  // put your main code here, to run repeatedly:
 }
