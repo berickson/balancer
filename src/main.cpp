@@ -15,6 +15,13 @@
 #include "FunctionalInterrupt.h"
 #include "QuadratureEncoder.h"
 
+// https://github.com/pvizeli/CmdParser
+#include "CmdBuffer.hpp"
+#include "CmdParser.hpp"
+#include "CmdCallback.hpp"
+
+#include "Preferences.h"
+
 // board at https://www.amazon.com/gp/product/B07DKD79Y9
 const int oled_address=0x3c;
 const int pin_oled_sda = 4;
@@ -211,6 +218,8 @@ public:
   unsigned long connect_start_ms = 0;
   unsigned long last_execute_ms = 0;
   unsigned long last_client_activity_ms = 0;
+  String ssid;
+  String password;
 
   String method="";  // GET, PUT, ETC.
   String path="";    // URI
@@ -229,6 +238,20 @@ public:
   } current_state = status_not_connected;
 
 
+  void set_connection_info(String ssid, String password) {
+    WiFi.disconnect();
+    this->ssid = ssid;
+    this->password = password;
+    current_state = status_not_connected;
+
+    Serial.print("connection info set to ssid: ");
+    Serial.print(ssid);
+    Serial.print(" password: ");
+    Serial.print(password);
+    Serial.println();
+  }
+
+
   void execute() {
     auto ms = millis();
     auto wifi_status = WiFi.status();
@@ -237,7 +260,7 @@ public:
     switch (current_state) {
       case status_not_connected:
         connect_start_ms = ms;
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        WiFi.begin(ssid.c_str(), password.c_str());
         current_state = status_connecting;
         break;
       
@@ -391,6 +414,9 @@ MPU6050 mpu;
 WifiTask wifi_task;
 QuadratureEncoder left_encoder(pin_left_a, pin_left_b);
 QuadratureEncoder right_encoder(pin_right_a, pin_right_b);
+CmdCallback<100> commands;
+Preferences preferences;
+
 
 
 
@@ -422,7 +448,24 @@ void right_b_changed(){
 }
 
 
+void cmd_set_wifi_config(CmdParser * parser) {
+  char * ssid = parser->getCmdParam(1);
+  char * password = parser->getCmdParam(2);
+  preferences.begin("main",false);
+  preferences.putString("ssid", ssid);
+  preferences.putString("password", password);
+  preferences.end();
+  wifi_task.set_connection_info(ssid, password);
+}
+
+
 void setup() {
+
+  commands.addCmd("set_wifi_config", cmd_set_wifi_config);
+  preferences.begin("main", true);
+  wifi_task.set_connection_info(preferences.getString("ssid"), preferences.getString("password"));
+  preferences.end();
+
   Serial.begin(115200);
   // button.init(pin_touch);
   bluetooth.begin("bke");
@@ -512,6 +555,7 @@ void control_robot(float sp_x, float sp_v, float sp_a, float height) {
   // last_wheel_osition = wheel_position
 }
 
+
 void loop() {
   static uint32_t loop_count = 0;
   static LineReader line_reader;
@@ -528,13 +572,17 @@ void loop() {
 
     // check for a new line in bluetooth
     if(line_reader.get_line(bluetooth)) {
+      CmdParser parser;
+      CmdBuffer<100> buffer;
+      parser.parseCmd((char *)line_reader.line.c_str());
+      commands.processCmd(&parser);
       last_bluetooth_line = line_reader.line;
     }
   }
 
   if(every_n_ms(loop_ms, last_loop_ms, 500)) {
-    Serial.println(String("left Direction changes: ") + left_encoder.direction_change_count);
-    Serial.println(String("extra interrupts left: ") + left_encoder.extra_interrupts_count);
+    //Serial.println(String("left Direction changes: ") + left_encoder.direction_change_count);
+    //Serial.println(String("extra interrupts left: ") + left_encoder.extra_interrupts_count);
   }
 
   if(every_n_ms(loop_ms, last_loop_ms, 10)) {
