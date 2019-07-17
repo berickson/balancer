@@ -427,9 +427,9 @@ void set_motor_power(int which, float power) {
   int power_channel = (power>0) ? channel_fwd : channel_rev;
   int zero_channel = (power>0) ? channel_rev : channel_fwd;
   uint32_t duty = uint32_t(255*fabs(power));
-  Serial.println("set_motor_speed channel: "+String(channel_fwd) + "zero_channel: " + String(zero_channel) + " duty: " + String(duty));
+  Serial.println("set_motor_speed channel: "+String(power_channel) + "zero_channel: " + String(zero_channel) + " duty: " + String(duty));
   ledcWrite(power_channel, duty);
-  digitalWrite(zero_channel, LOW);
+  ledcWrite(zero_channel, 0);
 }
 
 void left_a_changed(){
@@ -458,10 +458,18 @@ void cmd_set_wifi_config(CmdParser * parser) {
   wifi_task.set_connection_info(ssid, password);
 }
 
+void cmd_set_motor_power(CmdParser * parser) {
+  double left_power = atof(parser->getCmdParam(1));
+  double right_power = atof(parser->getCmdParam(2));
+  set_motor_power(0, left_power);
+  set_motor_power(1, right_power);
+}
+
 
 void setup() {
 
   commands.addCmd("set_wifi_config", cmd_set_wifi_config);
+  commands.addCmd("set_motor_power", cmd_set_motor_power);
   preferences.begin("main", true);
   wifi_task.set_connection_info(preferences.getString("ssid"), preferences.getString("password"));
   preferences.end();
@@ -503,7 +511,7 @@ void setup() {
 
   
    for(auto x: {0,1}) {
-     set_motor_power(x,1);
+     set_motor_power(x,0);
    }
 
 
