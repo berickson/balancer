@@ -41,6 +41,8 @@ const int pin_left_cmd_rev = 21;
 
 const int pin_built_in__led = 25;
 
+const int pin_enable_ext_3v3 = 26;
+
 const int pin_touch = T4;
 
 const uint8_t left_cmd_fwd_pwm_channel = 0;
@@ -226,23 +228,38 @@ public:
   String version=""; // HTTP Version
 
 
+  bool enabled=false;
   bool trace = false;
   bool log_serial = true;
 
   enum {
+    status_disabled,
     status_not_connected,
     status_connecting,
     status_awaiting_client,
     status_awaiting_command,
     status_awaiting_header
-  } current_state = status_not_connected;
+  } current_state = status_disabled;
+
+  void set_enable(bool enable_wifi) {
+    if(enable_wifi==this->enabled) return;
+    enabled = enable_wifi;
+    if(enabled) {
+      current_state = status_not_connected;
+    } else {
+      WiFi.disconnect(true, true);
+      current_state = status_disabled;
+    }
+  }
 
 
   void set_connection_info(String ssid, String password) {
     WiFi.disconnect();
     this->ssid = ssid;
     this->password = password;
-    current_state = status_not_connected;
+    if(current_state != status_disabled) {
+      current_state = status_not_connected;
+    }
 
     Serial.print("connection info set to ssid: ");
     Serial.print(ssid);
@@ -258,6 +275,9 @@ public:
 
 
     switch (current_state) {
+      case status_disabled:
+        break;
+
       case status_not_connected:
         connect_start_ms = ms;
         WiFi.begin(ssid.c_str(), password.c_str());
@@ -417,6 +437,8 @@ QuadratureEncoder right_encoder(pin_right_a, pin_right_b);
 CmdCallback<100> commands;
 Preferences preferences;
 
+bool page_down_requested = false;
+
 
 
 
@@ -465,13 +487,57 @@ void cmd_set_motor_power(CmdParser * parser) {
   set_motor_power(1, right_power);
 }
 
+void cmd_reset_odo(CmdParser * parser) {
+  right_encoder.reset();
+  left_encoder.reset();
+}
+
+void cmd_set_enable_wifi(CmdParser * parser) {
+  bool enable_wifi = String(parser->getCmdParam(1))=="1";
+  wifi_task.set_enable(enable_wifi);
+  preferences.begin("main");
+  preferences.putBool("enable_wifi", enable_wifi);
+  preferences.end();
+
+}
+
+void cmd_shutdown(CmdParser * parser) {
+  digitalWrite(pin_enable_ext_3v3,LOW);
+  delayMicroseconds(1000000);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TOUCHPAD);
+  esp_deep_sleep_start();
+}
+
+void cmd_page_down(CmdParser * parser) {
+  page_down_requested = true;
+}
+
+void cmd_set_peripheral_power(CmdParser * parser) {
+  bool enable = (atoi(parser->getCmdParam(1)) == 1);
+
+  digitalWrite(pin_enable_ext_3v3, enable);
+  if(enable) {
+    pinMode(pin_enable_ext_3v3, OUTPUT);
+    digitalWrite(pin_enable_ext_3v3, true);
+  } else {
+    pinMode(pin_enable_ext_3v3,INPUT);
+  }
+
+}
+
 
 void setup() {
 
   commands.addCmd("set_wifi_config", cmd_set_wifi_config);
   commands.addCmd("set_motor_power", cmd_set_motor_power);
+  commands.addCmd("set_enable_wifi", cmd_set_enable_wifi);
+  commands.addCmd("set_peripheral_power", cmd_set_peripheral_power);
+  commands.addCmd("shutdown", cmd_shutdown);
+  commands.addCmd("page_down", cmd_page_down);
+  commands.addCmd("reset_odo", cmd_reset_odo);
   preferences.begin("main", true);
   wifi_task.set_connection_info(preferences.getString("ssid"), preferences.getString("password"));
+  wifi_task.set_enable(preferences.getBool("enable_wifi"));
   preferences.end();
 
   Serial.begin(115200);
@@ -488,6 +554,9 @@ void setup() {
   pinMode(pin_left_cmd_rev, OUTPUT);
   pinMode(pin_right_cmd_fwd, OUTPUT);
   pinMode(pin_right_cmd_rev, OUTPUT);
+  pinMode(pin_enable_ext_3v3, OUTPUT);
+
+  digitalWrite(pin_enable_ext_3v3, HIGH);
 
   digitalWrite(pin_left_cmd_fwd, LOW);
   digitalWrite(pin_left_cmd_rev, LOW);
@@ -594,6 +663,15 @@ void loop() {
   }
 
   if(every_n_ms(loop_ms, last_loop_ms, 10)) {
+    static int current_page = 0;
+    const int max_page = 2;
+    if(page_down_requested) {
+      ++current_page;
+      page_down_requested = false;
+    }
+    if (current_page > max_page) {
+      current_page = 0;
+    }
     int16_t t_raw, ax_raw, ay_raw, az_raw, gx, gy, gz;
     t_raw = mpu.getTemperature();
     float t = float(t_raw)/340.+36.53;
@@ -604,20 +682,26 @@ void loop() {
 
 
     display.clear();
+    if (current_page == 0) {
+      display.drawString(0, 0, "la:"+String(left_encoder.odometer_a)+ " lb:"+String(left_encoder.odometer_b));
+      display.drawString(0, 10," ra:"+String(right_encoder.odometer_a)+" rb:"+String(right_encoder.odometer_b));
+      display.drawString(0, 20, "loop_count: " + String(loop_count/1000)+String("k "));
+      display.drawString(0, 30, WiFi.localIP().toString());
+      display.drawString(0, 50, last_bluetooth_line);
+    display.display();
 
-    display.drawString(0, 0, "la:"+String(left_encoder.odometer_a)+ " lb:"+String(left_encoder.odometer_b)+" ra:"+String(right_encoder.odometer_a)+" rb:"+String(right_encoder.odometer_b));
+    }
+    if (current_page == 1) {
+      display.drawString(0, 0, String("t:")+String(t));
+      display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
+      display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
 
-
-    
-    // display.drawString(0, 0, String("t:")+String(t));
-    display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
-    display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
-    //display.drawString(0, 0, "touch_value: " + String(button.touch_value));
-    //display.drawString(0, 10, "press_count: " + String(button.press_count));
-    //display.drawString(0, 20, "click_count: "+String(button.click_count));
-    display.drawString(0, 30, "loop_count: " + String(loop_count/1000)+String("k "));
-    display.drawString(0, 40, WiFi.localIP().toString());
-    display.drawString(0, 50, last_bluetooth_line);
+    }
+    if (current_page == 2) {
+      display.drawString(0, 0, "touch_value: " + String(button.touch_value));
+      display.drawString(0, 10, "press_count: " + String(button.press_count));
+      display.drawString(0, 20, "click_count: "+String(button.click_count));
+    }
     display.display();
   }
   ++loop_count;
