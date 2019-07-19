@@ -1,7 +1,8 @@
 #include <Arduino.h>
 
-#include "I2Cdev.h"
-#include "MPU6050.h"
+//#include "I2Cdev.h"
+
+#include "Mpu6050Wrapper.h"
 
 #include "SSD1306.h"
 #include "OLEDDisplay.h"
@@ -42,6 +43,8 @@ const int pin_left_cmd_rev = 21;
 const int pin_built_in__led = 25;
 
 const int pin_enable_ext_3v3 = 26;
+
+const int pin_mpu_interrupt = 2;
 
 const int pin_touch = T4;
 
@@ -430,7 +433,7 @@ public:
 Button button;
 const uint32_t bluetooth_buffer_reserve = 500;
 BluetoothSerial bluetooth;
-MPU6050 mpu;
+Mpu6050Wrapper mpu;
 WifiTask wifi_task;
 QuadratureEncoder left_encoder(pin_left_a, pin_left_b);
 QuadratureEncoder right_encoder(pin_right_a, pin_right_b);
@@ -595,16 +598,8 @@ void setup() {
   display.init();
 
   Serial.println("Initializing mpu...");
-  mpu.initialize();
-
-  // verify connection
-  Serial.println("Testing mpu connection...");
-  Serial.println(mpu.testConnection() ? "MPU6050 connection successful" : "MPU6050 connection failed");
-  mpu.reset();
-  delayMicroseconds(50000);
-  mpu.setSleepEnabled(false);
-  mpu.setTempSensorEnabled(true);
-  mpu.setFullScaleAccelRange(0);
+  mpu.enable_interrupts(pin_mpu_interrupt);
+  mpu.setup();
 
   display.println("Setup complete");
   display.display();
@@ -639,6 +634,7 @@ void loop() {
   static String last_bluetooth_line;
   static unsigned long last_loop_ms = 0;
   unsigned long loop_ms = millis();
+  mpu.execute();
 
 
   if(every_n_ms(loop_ms, last_loop_ms, 1)) {
@@ -673,9 +669,9 @@ void loop() {
       current_page = 0;
     }
     int16_t t_raw, ax_raw, ay_raw, az_raw, gx, gy, gz;
-    t_raw = mpu.getTemperature();
+    t_raw = mpu.mpu.getTemperature();
     float t = float(t_raw)/340.+36.53;
-    mpu.getMotion6(&ax_raw, &ay_raw, &az_raw, &gx, &gy, &gz);
+    mpu.mpu.getMotion6(&ax_raw, &ay_raw, &az_raw, &gx, &gy, &gz);
     float ax = ax_raw / 16200.0;
     float ay = ay_raw / 16700.0;
     float az = az_raw / 14800.0;
@@ -695,6 +691,8 @@ void loop() {
       display.drawString(0, 0, String("t:")+String(t));
       display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
       display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
+      display.drawString(0, 30, "yaw:" + String(mpu.yaw_pitch_roll[0]) + "pitch" + mpu.yaw_pitch_roll[1] + "roll: " + mpu.yaw_pitch_roll[2]);
+      //display.drawString(0, 30,(String)mpu. )
 
     }
     if (current_page == 2) {
