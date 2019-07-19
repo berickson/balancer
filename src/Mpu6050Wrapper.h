@@ -166,7 +166,7 @@ void Mpu6050Wrapper::enable_interrupts(int interrupt_pin) {
 
 void Mpu6050Wrapper::setup() {
     rest_a_mag = 7645.45;
-    set_zero_orientation( Quaternion(-0.69, 0.000,0.73,-0.00) );
+    set_zero_orientation( Quaternion(0, 0.000,0,1) );
     ax_bias = 0.0;
     ay_bias = 0.0;
     az_bias = 0.0;

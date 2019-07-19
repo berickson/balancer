@@ -692,6 +692,7 @@ void loop() {
       display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
       display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
       display.drawString(0, 30, "yaw:" + String(mpu.yaw_pitch_roll[0]) + "pitch" + mpu.yaw_pitch_roll[1] + "roll: " + mpu.yaw_pitch_roll[2]);
+      display.drawString(0,40, (String) "pitch: " + mpu.pitch);
       //display.drawString(0, 30,(String)mpu. )
 
     }
