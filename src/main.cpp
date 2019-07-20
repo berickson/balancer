@@ -46,7 +46,7 @@ const int pin_enable_ext_3v3 = 26;
 
 const int pin_mpu_interrupt = 2;
 
-const int pin_touch = T4;
+const int pin_touch = 33; // T8;
 
 const uint8_t left_cmd_fwd_pwm_channel = 0;
 const uint8_t left_cmd_rev_pwm_channel = 1;
@@ -456,22 +456,6 @@ void set_motor_power(int which, float power) {
   ledcWrite(power_channel, duty);
   ledcWrite(zero_channel, 0);
 }
-
-void left_a_changed(){
-  left_encoder.sensor_a_changed();
-}
-void left_b_changed(){
-  left_encoder.sensor_b_changed();
-}
-
-void right_a_changed(){
-  right_encoder.sensor_a_changed();
-}
-
-void right_b_changed(){
-  right_encoder.sensor_b_changed();
-}
-
 
 void cmd_set_wifi_config(CmdParser * parser) {
   char * ssid = parser->getCmdParam(1);
