@@ -12,6 +12,7 @@
 #include "functional"
 #include <vector>
 #include "Mpu6050Wrapper.h"
+#include "speedometer.h"
 
 #include "FunctionalInterrupt.h"
 #include "QuadratureEncoder.h"
@@ -437,6 +438,8 @@ Mpu6050Wrapper mpu;
 WifiTask wifi_task;
 QuadratureEncoder left_encoder(pin_left_a, pin_left_b);
 QuadratureEncoder right_encoder(pin_right_a, pin_right_b);
+Speedometer left_speedometer(0.2/982);
+Speedometer right_speedometer(0.2/1036 );
 CmdCallback<100> commands;
 Preferences preferences;
 
@@ -499,7 +502,8 @@ void cmd_shutdown(CmdParser * parser) {
   pinMode(15, INPUT_PULLDOWN);
   pinMode(4, INPUT_PULLDOWN);
 
-  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TOUCHPAD);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+
 
   esp_deep_sleep_start();
   
@@ -653,6 +657,10 @@ void loop() {
   }
 
   if(every_n_ms(loop_ms, last_loop_ms, 10)) {
+    auto us = micros();
+    left_speedometer.set_ticks(us, left_encoder.odometer_a+left_encoder.odometer_b);
+    right_speedometer.set_ticks(us, right_encoder.odometer_a+right_encoder.odometer_b);
+
     static int current_page = 0;
     const int max_page = 2;
     if(page_down_requested) {
@@ -679,7 +687,7 @@ void loop() {
       display.drawString(0, 20, "lp: " + String(loop_count/1000)+String("k ") +" n:"+String(mpu.readingCount));
       display.drawString(0, 30, WiFi.localIP().toString());
       display.drawString(0,40, (String) "pitch: " + mpu.pitch);
-      display.drawString(0, 50, last_bluetooth_line);
+      display.drawString(0, 50, (String) "vl:" + left_speedometer.get_velocity() + " vr: " + right_speedometer.get_velocity());
     display.display();
 
     }
