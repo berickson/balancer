@@ -13,16 +13,18 @@ lib_deps =
 #include <math.h>
 #include "helper_3dmath.h"
 //#define MPU9150_INCLUDE_DMP_MOTIONAPPS41
-#define __PGMSPACE_H_
+
 
 // stuff missing from math.h?
 #define M_PI 3.14159265358979323846
 #define min(a,b) (a<b?a:b)
-
+#define __PGMSPACE_H_
 #include <MPU6050_6Axis_MotionApps20.h>
+#undef __PGMSPACE_H_
 #include "Logger.h"
 
 #include "Statistics.h"
+#include "FunctionalInterrupt.h"
 
 
 class Mpu6050Wrapper {
@@ -38,6 +40,7 @@ public:
 
   // MPU control/status vars
   bool interrupt_enabled = false;
+  volatile long interrupt_pending = false;
 
   uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
   uint16_t fifoCount;     // count of all bytes currently in FIFO
@@ -84,7 +87,13 @@ public:
   void log_status();
 
   void execute();
+
+private:
+  void IRAM_ATTR dmp_ready() {
+
+  }
 };
+
 
 #define rads2degrees(radians) (radians * 180. / M_PI)
 
@@ -93,10 +102,10 @@ public:
 // ===               INTERRUPT DETECTION ROUTINE                ===
 // ================================================================
 
-volatile bool interrupt_pending = false;     // indicates whether MPU interrupt pin has gone high
-void dmpDataReady() {
-    interrupt_pending = true;
-}
+//volatile bool interrupt_pending = false;     // indicates whether MPU interrupt pin has gone high
+//static void dmpDataReady() {
+    //interrupt_pending = true;
+//}
 
 // this will calibrate rest position based on gravity alone
 void Mpu6050Wrapper::calibrate_as_horizontal() {
@@ -159,7 +168,7 @@ void Mpu6050Wrapper::enable_interrupts(int interrupt_pin) {
     // enable Arduino interrupt detection
     log(TRACE_MPU,F("Enabling interrupt detection (Arduino external interrupt "));
     pinMode(interrupt_pin, INPUT);
-    attachInterrupt(interrupt_pin,dmpDataReady, RISING);
+    //attachInterrupt(interrupt_pin, std::bind(&Mpu6050Wrapper::dmp_ready, this), CHANGE);
     interrupt_pending = mpu.getIntStatus();
     interrupt_enabled = true;
 }
@@ -269,15 +278,16 @@ void Mpu6050Wrapper::execute(){
     if (fifoCount < packetSize)
         return;
 
-    if (fifoCount >= 1024) {
+    if (fifoCount > packetSize) {
         mpu.resetFIFO();
         return;
     }
 
-    while(fifoCount >= packetSize) {
+    if(fifoCount == packetSize) {
         log(TRACE_MPU,"reading mpu");
         mpu.getFIFOBytes(fifoBuffer, packetSize);
-        fifoCount -= packetSize;
+        mpu.resetFIFO();
+        //fifoCount -= packetSize;
         readingCount++;
     }
 

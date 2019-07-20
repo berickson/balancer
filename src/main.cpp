@@ -2,7 +2,6 @@
 
 //#include "I2Cdev.h"
 
-#include "Mpu6050Wrapper.h"
 
 #include "SSD1306.h"
 #include "OLEDDisplay.h"
@@ -12,6 +11,7 @@
 #include "secret.h"
 #include "functional"
 #include <vector>
+#include "Mpu6050Wrapper.h"
 
 #include "FunctionalInterrupt.h"
 #include "QuadratureEncoder.h"
@@ -544,7 +544,7 @@ void setup() {
   preferences.end();
 
   Serial.begin(115200);
-  // button.init(pin_touch);
+  button.init(pin_touch);
   bluetooth.begin("bke");
 
   left_encoder.init();
@@ -598,11 +598,11 @@ void setup() {
   display.init();
 
   Serial.println("Initializing mpu...");
-  mpu.enable_interrupts(pin_mpu_interrupt);
+  //delay(500);
+  //mpu.enable_interrupts(pin_mpu_interrupt);
   mpu.setup();
 
-  display.println("Setup complete");
-  display.display();
+  Serial.println("Setup complete");
   // put your setup code here, to run once:
 }
 
@@ -634,10 +634,10 @@ void loop() {
   static String last_bluetooth_line;
   static unsigned long last_loop_ms = 0;
   unsigned long loop_ms = millis();
-  mpu.execute();
 
 
   if(every_n_ms(loop_ms, last_loop_ms, 1)) {
+   mpu.execute();
    wifi_task.execute();
   
     // read the button
@@ -688,7 +688,7 @@ void loop() {
 
     }
     if (current_page == 1) {
-      display.drawString(0, 0, String("t:")+String(t));
+      display.drawString(0, 0, String("t:")+String(t)+" n:"+String(mpu.readingCount));
       display.drawString(0, 10, String("accel[") +String(ax)+","+String(ay)+","+String(az)+String("]"));
       display.drawString(0, 20, String("gyro[") +String(gx)+","+String(gy)+","+String(gz)+String("]"));
       display.drawString(0, 30, "yaw:" + String(mpu.yaw_pitch_roll[0]) + "pitch" + mpu.yaw_pitch_roll[1] + "roll: " + mpu.yaw_pitch_roll[2]);
