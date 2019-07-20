@@ -489,10 +489,20 @@ void cmd_set_enable_wifi(CmdParser * parser) {
 }
 
 void cmd_shutdown(CmdParser * parser) {
+
+  // turn off power to peripherals
   digitalWrite(pin_enable_ext_3v3,LOW);
-  delayMicroseconds(1000000);
+
+  // turn off pullups for i2c since they waste power
+  digitalWrite(15, LOW);
+  digitalWrite(4, LOW);
+  pinMode(15, INPUT_PULLDOWN);
+  pinMode(4, INPUT_PULLDOWN);
+
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TOUCHPAD);
+
   esp_deep_sleep_start();
+  
 }
 
 void cmd_page_down(CmdParser * parser) {
@@ -661,12 +671,14 @@ void loop() {
     float az = az_raw / 14800.0;
 
 
+
     display.clear();
     if (current_page == 0) {
       display.drawString(0, 0, "la:"+String(left_encoder.odometer_a)+ " lb:"+String(left_encoder.odometer_b));
       display.drawString(0, 10," ra:"+String(right_encoder.odometer_a)+" rb:"+String(right_encoder.odometer_b));
-      display.drawString(0, 20, "loop_count: " + String(loop_count/1000)+String("k "));
+      display.drawString(0, 20, "lp: " + String(loop_count/1000)+String("k ") +" n:"+String(mpu.readingCount));
       display.drawString(0, 30, WiFi.localIP().toString());
+      display.drawString(0,40, (String) "pitch: " + mpu.pitch);
       display.drawString(0, 50, last_bluetooth_line);
     display.display();
 
