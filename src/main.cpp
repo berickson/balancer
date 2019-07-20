@@ -430,6 +430,76 @@ public:
 
 };
 
+class PID {
+
+  float k_p=1;
+  float k_i=1;
+  float k_d=0;
+  bool additive = false;
+
+  float max_i_contribution = 1.0;
+  float max_output = 1;
+  float min_output = -1;
+  float output = 0;
+
+  float set_p = 0;
+  float set_d = 0;
+
+  float error_i = 0;
+
+  float last_p = NAN;
+  unsigned long last_us = 0;
+
+public:
+  void set_gains(float k_p, float k_i, float k_d, bool additive) {
+    this->k_p = k_p;
+    this->k_i = k_i;
+    this->k_d = k_d;
+    this->additive = additive;
+  }
+
+  void reset() {
+    last_p = NAN;
+    last_us = 0;
+    error_i = 0;
+  }
+
+  void set(float p, float d = 0) {
+    set_p = p;
+    set_d = d;
+  }
+  
+  float next_output(unsigned long us, float p, float d=NAN) {
+    float error_p = set_p - p;
+    if(!isnan(last_p)) {
+      float dt = (us-last_us)/1.0E6;
+      if(dt >= 0) {
+        error_i += error_p * dt;
+        if (isnan(d)) {
+          d = (p-last_p)/dt;
+        }
+      }
+    }
+    last_p = p;
+    last_us = us;
+    float error_d = isnan(d) ? 0 : set_d - d;
+
+    if(fabs(error_i * k_i) > max_i_contribution) {
+      error_i = max_i_contribution / k_i;
+    }
+
+    float power = k_p * error_p + k_i * error_i + k_d * error_d;
+    power = constrain(power, min_output, max_output);
+    if(additive) {
+      output += power;
+    } else {
+      output = power;
+    }
+    constrain(output, min_output, max_output);
+    return output;
+  }
+};
+
 // globals
 Button button;
 const uint32_t bluetooth_buffer_reserve = 500;
@@ -440,8 +510,12 @@ QuadratureEncoder left_encoder(pin_left_a, pin_left_b);
 QuadratureEncoder right_encoder(pin_right_a, pin_right_b);
 Speedometer left_speedometer(0.2/982);
 Speedometer right_speedometer(0.2/1036 );
+PID left_wheel_pid;
+PID right_wheel_pid;
 CmdCallback<100> commands;
 Preferences preferences;
+
+
 
 bool page_down_requested = false;
 
@@ -455,9 +529,14 @@ void set_motor_power(int which, float power) {
   int power_channel = (power>0) ? channel_fwd : channel_rev;
   int zero_channel = (power>0) ? channel_rev : channel_fwd;
   uint32_t duty = uint32_t(255*fabs(power));
-  Serial.println("set_motor_speed channel: "+String(power_channel) + "zero_channel: " + String(zero_channel) + " duty: " + String(duty));
+  //Serial.println("set_motor_speed channel: "+String(power_channel) + "zero_channel: " + String(zero_channel) + " duty: " + String(duty));
   ledcWrite(power_channel, duty);
   ledcWrite(zero_channel, 0);
+}
+
+void set_motor_power(float left, float right) {
+  set_motor_power(0, left);
+  set_motor_power(1, right);
 }
 
 void cmd_set_wifi_config(CmdParser * parser) {
@@ -526,6 +605,23 @@ void cmd_set_peripheral_power(CmdParser * parser) {
 
 }
 
+void cmd_set_wheel_speed(CmdParser * parser) {
+  left_wheel_pid.reset();
+  left_wheel_pid.set(atof(parser->getCmdParam(1)));
+  right_wheel_pid.reset();
+  right_wheel_pid.set(atof(parser->getCmdParam(2)));
+}
+
+void cmd_set_wheel_speed_pid(CmdParser * parser) {
+  float k_p = atof(parser->getCmdParam(1));
+  float k_i = atof(parser->getCmdParam(2));
+  float k_d = atof(parser->getCmdParam(3));
+  bool additive = (atoi(parser->getCmdParam(4)) == 1);
+  left_wheel_pid.set_gains(k_p, k_i, k_d, additive);
+  right_wheel_pid.set_gains(k_p, k_i, k_d, additive);
+}
+
+
 
 void setup() {
 
@@ -536,6 +632,8 @@ void setup() {
   commands.addCmd("shutdown", cmd_shutdown);
   commands.addCmd("page_down", cmd_page_down);
   commands.addCmd("reset_odo", cmd_reset_odo);
+  commands.addCmd("set_wheel_speed", cmd_set_wheel_speed);
+  commands.addCmd("set_wheel_speed_pid", cmd_set_wheel_speed_pid);
   preferences.begin("main", true);
   wifi_task.set_connection_info(preferences.getString("ssid"), preferences.getString("password"));
   wifi_task.set_enable(preferences.getBool("enable_wifi"));
@@ -547,6 +645,9 @@ void setup() {
 
   left_encoder.init();
   right_encoder.init();
+
+  left_wheel_pid.set_gains(3.0, 15.0, 0, false);
+  right_wheel_pid.set_gains(3.0, 15.0, 0, false);
 
   pinMode(pin_oled_rst, OUTPUT);
   pinMode(pin_built_in__led, OUTPUT);
@@ -651,15 +752,20 @@ void loop() {
     }
   }
 
-  if(every_n_ms(loop_ms, last_loop_ms, 500)) {
-    //Serial.println(String("left Direction changes: ") + left_encoder.direction_change_count);
-    //Serial.println(String("extra interrupts left: ") + left_encoder.extra_interrupts_count);
-  }
 
   if(every_n_ms(loop_ms, last_loop_ms, 10)) {
     auto us = micros();
     left_speedometer.set_ticks(us, left_encoder.odometer_a+left_encoder.odometer_b);
     right_speedometer.set_ticks(us, right_encoder.odometer_a+right_encoder.odometer_b);
+    
+    static float left_power = 0;
+    static float right_power = 0;
+
+    left_power = left_wheel_pid.next_output(us, left_speedometer.get_velocity(), left_speedometer.get_smooth_acceleration());
+    right_power = right_wheel_pid.next_output(us, right_speedometer.get_velocity(), right_speedometer.get_smooth_acceleration());
+    //Serial.println((String)"pl: "+ power_left + "pr: " + power_right);
+    set_motor_power(left_power, right_power);
+
 
     static int current_page = 0;
     const int max_page = 2;

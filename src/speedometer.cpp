@@ -47,8 +47,6 @@ double Speedometer::add_ticks(uint32_t clock_us, int32_t ticks_moved) {
   last_odo += ticks_moved;
 
   velocity = meters_moved / elapsed_seconds;
-  Serial.print("velocity: ");
-  Serial.println(velocity);
   if (ticks_moved == 0) {
     // no tick this time, how long has it been?
     elapsed_seconds= ( clock_us - last_change_us) / 1000000.;
