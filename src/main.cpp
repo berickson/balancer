@@ -431,7 +431,7 @@ public:
 };
 
 class PID {
-
+public:
   float k_p=1;
   float k_i=1;
   float k_d=0;
@@ -451,6 +451,11 @@ class PID {
   unsigned long last_us = 0;
 
 public:
+
+  PID(float k_p=1.0, float k_i=0, float k_d=0, bool additive=false) {
+    set_gains(k_p, k_i, k_d, additive);
+  }
+
   void set_gains(float k_p, float k_i, float k_d, bool additive) {
     this->k_p = k_p;
     this->k_i = k_i;
@@ -514,10 +519,22 @@ PID left_wheel_pid;
 PID right_wheel_pid;
 CmdCallback<100> commands;
 Preferences preferences;
+float goal_x_position;
+enum ControlMode { manual, seeking_goal_x_position };
+ControlMode control_mode = ControlMode::manual;
 
 
 
 bool page_down_requested = false;
+
+
+float get_x_position() {
+  return (left_speedometer.get_meters_travelled() + right_speedometer.get_meters_travelled()) / 2.0;
+}
+
+float get_velocity() {
+  return (left_speedometer.get_smooth_velocity() + right_speedometer.get_smooth_velocity()) / 2.0;
+}
 
 
 
@@ -537,6 +554,13 @@ void set_motor_power(int which, float power) {
 void set_motor_power(float left, float right) {
   set_motor_power(0, left);
   set_motor_power(1, right);
+}
+
+void set_wheel_speed(float left_speed, float right_speed) {
+  left_wheel_pid.reset();
+  left_wheel_pid.set(left_speed);
+  right_wheel_pid.reset();
+  right_wheel_pid.set(right_speed);
 }
 
 void cmd_set_wifi_config(CmdParser * parser) {
@@ -567,7 +591,12 @@ void cmd_set_enable_wifi(CmdParser * parser) {
   preferences.begin("main");
   preferences.putBool("enable_wifi", enable_wifi);
   preferences.end();
+}
 
+void cmd_set_goal_distance(CmdParser * parser) {
+  auto distance = atof(parser->getCmdParam(1));
+  goal_x_position = get_x_position() + distance;
+  control_mode = ControlMode::seeking_goal_x_position;
 }
 
 void cmd_shutdown(CmdParser * parser) {
@@ -606,10 +635,8 @@ void cmd_set_peripheral_power(CmdParser * parser) {
 }
 
 void cmd_set_wheel_speed(CmdParser * parser) {
-  left_wheel_pid.reset();
-  left_wheel_pid.set(atof(parser->getCmdParam(1)));
-  right_wheel_pid.reset();
-  right_wheel_pid.set(atof(parser->getCmdParam(2)));
+  set_wheel_speed(atof(parser->getCmdParam(1)), atof(parser->getCmdParam(2)));
+  control_mode = ControlMode::manual;
 }
 
 void cmd_set_wheel_speed_pid(CmdParser * parser) {
@@ -619,6 +646,50 @@ void cmd_set_wheel_speed_pid(CmdParser * parser) {
   bool additive = (atoi(parser->getCmdParam(4)) == 1);
   left_wheel_pid.set_gains(k_p, k_i, k_d, additive);
   right_wheel_pid.set_gains(k_p, k_i, k_d, additive);
+}
+
+
+
+ void go_to_goal_x(float pitch, float cart_x, float cart_velocity, float goal_x) {
+  auto us = micros();
+  auto pendulum_length = 0.3;
+  static float last_pitch = 0;
+  
+  //  from the pendulums point of view
+  auto pendulum_x = pitch * pendulum_length + cart_x;
+
+  // use a position pid t find desired velocity
+  static PID position_pid;
+  position_pid.max_output = 0.2;
+  position_pid.min_output = 0.2;
+  position_pid.set(goal_x);
+  auto goal_velocity = position_pid.next_output(us, pendulum_x);
+
+  // use desired velocity to find desired pitch
+  static PID velocity_pid(0.1,0,0);
+  velocity_pid.max_output = 0.01;
+  velocity_pid.min_output = -0.01;
+  velocity_pid.set(goal_velocity);
+  auto goal_pitch = velocity_pid.next_output(us, cart_velocity);
+
+  // use desired pitch to get wheel_velocity
+  static PID pitch_pid(8, 0.0, 0.1  );
+  static auto last_ms = millis();
+  pitch_pid.set(0);
+  if(pitch!=last_pitch) {
+    float motor_power = -1.0* pitch_pid.next_output(us, pitch);
+    //set_wheel_speed(motor_power, motor_power);
+    Serial.print(millis()-last_ms);
+    Serial.print(",");
+    Serial.print(pitch,4);
+    Serial.print(",");
+    Serial.print(motor_power);
+    Serial.println();
+    set_motor_power(motor_power, motor_power);
+
+    last_pitch = pitch;
+    last_ms = millis();
+  }
 }
 
 
@@ -634,12 +705,13 @@ void setup() {
   commands.addCmd("reset_odo", cmd_reset_odo);
   commands.addCmd("set_wheel_speed", cmd_set_wheel_speed);
   commands.addCmd("set_wheel_speed_pid", cmd_set_wheel_speed_pid);
+  commands.addCmd("set_goal_distance", cmd_set_goal_distance);
   preferences.begin("main", true);
   wifi_task.set_connection_info(preferences.getString("ssid"), preferences.getString("password"));
   wifi_task.set_enable(preferences.getBool("enable_wifi"));
   preferences.end();
 
-  Serial.begin(115200);
+  Serial.begin(921600);
   button.init(pin_touch);
   bluetooth.begin("bke");
 
@@ -736,9 +808,9 @@ void loop() {
 
 
   if(every_n_ms(loop_ms, last_loop_ms, 1)) {
-   mpu.execute();
-   wifi_task.execute();
-  
+    mpu.execute();
+    wifi_task.execute();
+
     // read the button
     button.execute();
 
@@ -761,10 +833,14 @@ void loop() {
     static float left_power = 0;
     static float right_power = 0;
 
-    left_power = left_wheel_pid.next_output(us, left_speedometer.get_velocity(), left_speedometer.get_smooth_acceleration());
-    right_power = right_wheel_pid.next_output(us, right_speedometer.get_velocity(), right_speedometer.get_smooth_acceleration());
-    //Serial.println((String)"pl: "+ power_left + "pr: " + power_right);
-    set_motor_power(left_power, right_power);
+    if(control_mode == ControlMode::seeking_goal_x_position) {
+      go_to_goal_x(mpu.pitch, get_x_position(), get_velocity(), goal_x_position);
+    } else {
+      left_power = left_wheel_pid.next_output(us, left_speedometer.get_velocity(), left_speedometer.get_smooth_acceleration());
+      right_power = right_wheel_pid.next_output(us, right_speedometer.get_velocity(), right_speedometer.get_smooth_acceleration());
+      //Serial.println((String)"pl: "+ power_left + "pr: " + power_right);
+      set_motor_power(left_power, right_power);
+    }
 
 
     static int current_page = 0;

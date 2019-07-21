@@ -277,16 +277,23 @@ void Mpu6050Wrapper::execute(){
 
     if (fifoCount < packetSize)
         return;
-
-    if (fifoCount > packetSize) {
+    
+    if (fifoCount % packetSize > 0) {
+        Serial.println("odd count, resetting fifo");
         mpu.resetFIFO();
         return;
     }
 
-    if(fifoCount == packetSize) {
+    // if (fifoCount > packetSize) {
+    //     mpu.resetFIFO();
+    //     return;
+    // }
+
+    while(fifoCount > packetSize) {
         log(TRACE_MPU,"reading mpu");
         mpu.getFIFOBytes(fifoBuffer, packetSize);
-        mpu.resetFIFO();
+        fifoCount -= packetSize;
+        // mpu.resetFIFO();
         //fifoCount -= packetSize;
         readingCount++;
     }
