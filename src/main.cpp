@@ -8,7 +8,6 @@
 #include "math.h"
 #include "BluetoothSerial.h"
 #include "WiFi.h"
-#include "secret.h"
 #include "functional"
 #include <vector>
 #include "Mpu6050Wrapper.h"
