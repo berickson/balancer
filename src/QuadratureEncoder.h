@@ -2,7 +2,8 @@
 #include "Arduino.h"
 #include "FunctionalInterrupt.h"
 
- class QuadratureEncoder {
+
+class QuadratureEncoder {
   public:
   const int pin_sensor_a; // sensor that triggers first for forward
   const int pin_sensor_b; 
@@ -30,53 +31,52 @@
   void init() {
     pinMode(pin_sensor_a, INPUT);
     pinMode(pin_sensor_b, INPUT);
-    //attachInterrupt(pin_sensor_a, std::bind(&QuadratureEncoder::sensor_a_changed, this), CHANGE);
-    //attachInterrupt(pin_sensor_b, std::bind(&QuadratureEncoder::sensor_b_changed, this), CHANGE);
   }
-  
-  void sensor_a_changed() {
-    
-    int a=digitalRead(pin_sensor_a);
-    int b=digitalRead(pin_sensor_b);
+
+};
+
+
+void IRAM_ATTR sensor_a_changed(QuadratureEncoder & e ) {
+    int a=digitalRead(e.pin_sensor_a);
+    int b=digitalRead(e.pin_sensor_b);
     bool forward;
-    if(a==last_a) {
-      ++extra_interrupts_count;
+    if(a==e.last_a) {
+      ++e.extra_interrupts_count;
       return;
     }
     if(a==b){
       forward = false;
-      --odometer_a;
+      --e.odometer_a;
     } else {
       forward = true;
-      ++odometer_a;
+      ++e.odometer_a;
     }
-    if(forward!=last_forward) {
-      ++direction_change_count;
-      last_forward=forward;
+    if(forward!=e.last_forward) {
+      ++e.direction_change_count;
+      e.last_forward=forward;
     }
-    last_a=a;
-    last_b=b;
-  }
-  
-  void IRAM_ATTR sensor_b_changed() {
-    int a=digitalRead(pin_sensor_a);
-    int b=digitalRead(pin_sensor_b);
+    e.last_a=a;
+    e.last_b=b;
+}
+
+void IRAM_ATTR sensor_b_changed(QuadratureEncoder & e) {
+    int a=digitalRead(e.pin_sensor_a);
+    int b=digitalRead(e.pin_sensor_b);
     bool forward;
-    if(b==last_b) {
-      ++extra_interrupts_count;
+    if(b==e.last_b) {
+      ++e.extra_interrupts_count;
     }
     if(a==b){
       forward=true;
-      ++odometer_b;
+      ++e.odometer_b;
     } else {
       forward=false;
-      --odometer_b;
+      --e.odometer_b;
     }
-    if(forward!=last_forward) {
-      ++direction_change_count;
-      last_forward=forward;
+    if(forward!=e.last_forward) {
+      ++e.direction_change_count;
+      e.last_forward=forward;
     }
-    last_a=a;
-    last_b=b;
-  }
-};
+    e.last_a=a;
+    e.last_b=b;
+}

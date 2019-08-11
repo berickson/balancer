@@ -673,10 +673,10 @@ void cmd_set_wheel_speed_pid(CmdParser * parser) {
 
   // use desired pitch to get wheel_velocity
   static PID pitch_pid(0, 0.0, 8.1  );
-  static auto last_ms = millis();
-  pitch_pid.set(0);
+  pitch_pid.set(goal_pitch);
   if(pitch!=last_pitch) {
     float motor_power = -1.0* pitch_pid.next_output(us, pitch);
+    // static auto last_ms = millis();
     //set_wheel_speed(motor_power, motor_power);
     // Serial.print(millis()-last_ms);
     // Serial.print(",");
@@ -684,14 +684,30 @@ void cmd_set_wheel_speed_pid(CmdParser * parser) {
     // Serial.print(",");
     // Serial.print(motor_power);
     // Serial.println();
+    // last_ms = millis();
     set_motor_power(motor_power, motor_power);
 
     last_pitch = pitch;
-    last_ms = millis();
   }
 }
 
+// encoder interrupt handlers
 
+void IRAM_ATTR left_a_change() {
+  sensor_a_changed(left_encoder);
+}
+
+void IRAM_ATTR left_b_change() {
+  sensor_b_changed(left_encoder);
+}
+
+void IRAM_ATTR right_a_change() {
+  sensor_a_changed(right_encoder);
+}
+
+void IRAM_ATTR right_b_change() {
+  sensor_b_changed(right_encoder);
+}
 
 void setup() {
   commands.addCmd("set_wifi_config", cmd_set_wifi_config);
@@ -713,7 +729,13 @@ void setup() {
   button.init(pin_touch);
   bluetooth.begin("bke");
 
-  // put encoder init back here
+  left_encoder.init();
+  right_encoder.init();
+  attachInterrupt(pin_left_a, left_a_change, CHANGE);
+  attachInterrupt(pin_left_b, left_b_change, CHANGE);
+  attachInterrupt(pin_right_a, right_a_change, CHANGE);
+  attachInterrupt(pin_right_b, right_b_change, CHANGE);
+
 
   left_wheel_pid.set_gains(3.0, 15.0, 0, false);
   right_wheel_pid.set_gains(3.0, 15.0, 0, false);
@@ -795,87 +817,13 @@ void control_robot(float sp_x, float sp_v, float sp_a, float height) {
   // last_wheel_osition = wheel_position
 }
 
-void IRAM_ATTR sensor_a_changed(QuadratureEncoder & e ) {
-    int a=digitalRead(e.pin_sensor_a);
-    int b=digitalRead(e.pin_sensor_b);
-    bool forward;
-    if(a==e.last_a) {
-      ++e.extra_interrupts_count;
-      return;
-    }
-    if(a==b){
-      forward = false;
-      --e.odometer_a;
-    } else {
-      forward = true;
-      ++e.odometer_a;
-    }
-    if(forward!=e.last_forward) {
-      ++e.direction_change_count;
-      e.last_forward=forward;
-    }
-    e.last_a=a;
-    e.last_b=b;
-}
-
-void IRAM_ATTR sensor_b_changed(QuadratureEncoder & e) {
-    int a=digitalRead(e.pin_sensor_a);
-    int b=digitalRead(e.pin_sensor_b);
-    bool forward;
-    if(b==e.last_b) {
-      ++e.extra_interrupts_count;
-    }
-    if(a==b){
-      forward=true;
-      ++e.odometer_b;
-    } else {
-      forward=false;
-      --e.odometer_b;
-    }
-    if(forward!=e.last_forward) {
-      ++e.direction_change_count;
-      e.last_forward=forward;
-    }
-    e.last_a=a;
-    e.last_b=b;
-}
-
-void IRAM_ATTR left_a_change() {
-  sensor_a_changed(left_encoder);
-}
-
-void IRAM_ATTR left_b_change() {
-  sensor_b_changed(left_encoder);
-}
-
-void IRAM_ATTR right_a_change() {
-  sensor_a_changed(right_encoder);
-}
-
-void IRAM_ATTR right_b_change() {
-  sensor_b_changed(right_encoder);
-}
-
 
 void loop() {
-  static bool first_time = true;
   static uint32_t loop_count = 0;
   static LineReader line_reader;
   static String last_bluetooth_line;
   static unsigned long last_loop_ms = 0;
   unsigned long loop_ms = millis();
-
-  if(first_time) {
-    first_time = false;
-    left_encoder.init();
-    right_encoder.init();
-    attachInterrupt(pin_left_a, left_a_change, CHANGE);
-    attachInterrupt(pin_left_b, left_b_change, CHANGE);
-    attachInterrupt(pin_right_a, right_a_change, CHANGE);
-    attachInterrupt(pin_right_b, right_b_change, CHANGE);
-
-
-  }
 
 
   if(every_n_ms(loop_ms, last_loop_ms, 1)) {
