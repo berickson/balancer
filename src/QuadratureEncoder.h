@@ -6,9 +6,9 @@
   public:
   const int pin_sensor_a; // sensor that triggers first for forward
   const int pin_sensor_b; 
-  int last_a = -1;
-  int last_b = -1;
-  int last_forward = false;
+  volatile int last_a = -1;
+  volatile int last_b = -1;
+  volatile int last_forward = false;
 
   volatile long odometer_a = 0;
   volatile long odometer_b = 0;
@@ -30,11 +30,12 @@
   void init() {
     pinMode(pin_sensor_a, INPUT);
     pinMode(pin_sensor_b, INPUT);
-    attachInterrupt(pin_sensor_a, std::bind(&QuadratureEncoder::sensor_a_changed, this), CHANGE);
-    attachInterrupt(pin_sensor_b, std::bind(&QuadratureEncoder::sensor_b_changed, this), CHANGE);
+    //attachInterrupt(pin_sensor_a, std::bind(&QuadratureEncoder::sensor_a_changed, this), CHANGE);
+    //attachInterrupt(pin_sensor_b, std::bind(&QuadratureEncoder::sensor_b_changed, this), CHANGE);
   }
   
-  void IRAM_ATTR sensor_a_changed() {
+  void sensor_a_changed() {
+    
     int a=digitalRead(pin_sensor_a);
     int b=digitalRead(pin_sensor_b);
     bool forward;
