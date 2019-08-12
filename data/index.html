@@ -1,0 +1,68 @@
+<html>
+
+<head>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"> </script>
+  <style>
+    * {
+      font-size: 40pt;
+    }
+  </style>
+</head>
+
+<body>
+  loop_count: <span class='loop_count'></span> <br>
+  
+  The LED is %LED_STATE_NAME%.
+  <br><br>
+  Click <a href='/led_on'>here</a> to turn the LED on.<br>
+  Click <a href='/led_off'>here</a> to turn the LED off.<br>
+  <br>
+
+  <span>
+    <form>
+      <input></input>
+    </form>
+
+  </span>
+
+  <button onclick='sleep()'>sleep</button>
+
+  <script>
+      function sleep() {
+        var request = new XMLHttpRequest();
+        request.open('PUT', '/sleep');
+        request.send();
+      }
+  
+      (function poll() {
+        setTimeout(function () {
+          $.ajax({
+            url: "stats",
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            type: "GET",
+            success: function (data) {
+  
+              // check if null return (no results from API)
+              if (data == null) {
+                console.log('no data!');
+              } else {
+                $('.loop_count').text(data.loop_count);
+              }
+            },
+            error: function() {
+              $('.loop_count').text('poll failed');
+            },
+            dataType: "json",
+            complete: poll,
+            timeout: 2000
+          })
+        }, 100);
+      })();
+  
+    </script>
+  
+</body>
+
+</html

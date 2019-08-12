@@ -23,6 +23,12 @@
 
 #include "Preferences.h"
 
+#include "SPIFFS.h"
+#include "esp_wifi.h"
+
+// https://github.com/me-no-dev/ESPAsyncWebServer
+#include "ESPAsyncWebServer.h"
+
 // board at https://www.amazon.com/gp/product/B07DKD79Y9
 const int oled_address=0x3c;
 const int pin_oled_sda = 4;
@@ -54,8 +60,6 @@ const uint8_t right_cmd_fwd_pwm_channel = 2;
 const uint8_t right_cmd_rev_pwm_channel = 3;
 
 SSD1306 display(oled_address, pin_oled_sda, pin_oled_sdl);
-
-void empty_callback(){}
 
 bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long ms) {
   return (last_loop_ms % ms) + (loop_ms - last_loop_ms) >= ms;
@@ -147,8 +151,8 @@ class LineReader {
 };
 
 const int wifi_port = 80;
-const int wifi_max_clients = 1;
-WiFiServer server(wifi_port, wifi_max_clients);
+//const int wifi_max_clients = 1;
+AsyncWebServer server(wifi_port);
 
 struct HttpRoute {
   String method;
@@ -156,65 +160,21 @@ struct HttpRoute {
   std::function< void(WiFiClient & client) > execute;
 };
 
-void send_standard_header(WiFiClient & client) {
-    client.println("HTTP/1.1 200 OK");
-    client.println("Content-type:text/html");
-    client.println();
+
+
+String get_led_state_name() {
+  return digitalRead(pin_built_in__led)?"ON":"OFF";
 }
 
-void send_standard_response(WiFiClient & client) {
-    send_standard_header(client);
+String get_variable_value(const String& var)
+{
+  if(var == "LED_STATE_NAME"){
+    return get_led_state_name();
+  }
 
-    // the content of the HTTP response follows the header:
-    client.println("<html><head><style>");
-    client.println("* {font-size:40pt;}");
-    client.println("</style></head><body>");
-    client.println("<script>");
-    client.println("function sleep() {");
-    client.println("var request = new XMLHttpRequest();");
-    client.println("request.open('PUT','/sleep');");
-    client.println("request.send();");
-    client.println("}");
-    client.println("</script>");
-    client.println("The LED is ");
-    client.println(digitalRead(pin_built_in__led)?"ON":"OFF");
-    client.println("<br><br>");
-    client.println( "Click <a href='/led_on'>here</a> to turn the LED on.<br>" );
-    client.println( "Click <a href='/led_off'>here</a> to turn the LED off.<br>" );
-    client.println( "<br>" );
-    client.println("<button onclick='sleep()'>sleep</button>");
-    client.println("</body></html");
-
-    // The HTTP response ends with another blank line:
-    client.println();
+  return String();
 }
 
-HttpRoute route_turn_on_light {"GET","/led_on", [](WiFiClient & client)->void{
-  digitalWrite(pin_built_in__led, HIGH);               // GET /H turns the LED on
-  send_standard_response(client);
-}};
-
-HttpRoute route_turn_off_light {"GET","/led_off", [](WiFiClient & client)->void{
-  digitalWrite(pin_built_in__led, LOW);               // GET /H turns the LED on
-  send_standard_response(client);
-}};
-
-HttpRoute route_home {"GET","/", [](WiFiClient & client)->void{
-  send_standard_response(client);
-}};
-
-
-HttpRoute route_sleep{"PUT","/sleep", [](WiFiClient & client)->void{
-  touchAttachInterrupt(pin_touch, empty_callback, 120);
-  esp_sleep_enable_touchpad_wakeup();
-  client.println("Going to sleep now. You can use the touch pin to wake up. Good night!");
-  client.println();
-  client.stop();
-  esp_deep_sleep_start();
-}};
-
-
-std::vector<HttpRoute> routes{route_home, route_turn_on_light, route_turn_off_light, route_sleep};
 
 class WifiTask {
 public:
@@ -255,7 +215,6 @@ public:
     }
   }
 
-
   void set_connection_info(String ssid, String password) {
     WiFi.disconnect();
     this->ssid = ssid;
@@ -283,6 +242,8 @@ public:
 
       case status_not_connected:
         connect_start_ms = ms;
+        WiFi.mode(WIFI_STA);
+        esp_wifi_set_ps (WIFI_PS_NONE);
         WiFi.begin(ssid.c_str(), password.c_str());
         current_state = status_connecting;
         break;
@@ -297,13 +258,13 @@ public:
         if (wifi_status == WL_CONNECTED) {
           server.begin();
           current_state = status_awaiting_client;
-          if(trace) Serial.print("connected, waiting for client");
+          if(trace) Serial.print("wifi connected, web server started");
         } else {
           // if(every_n_ms(last_execute_ms, ms, 1000)) {
           //   Serial.print(wifi_status);
           // }
           if(ms - connect_start_ms > 5000) {
-            if(trace) Serial.print("coudln't connect, trying again");
+            if(trace) Serial.print("couldn't connect, trying again");
             WiFi.disconnect();
             current_state = status_not_connected;
             break;
@@ -313,110 +274,10 @@ public:
 
       case status_awaiting_client:
         if (wifi_status != WL_CONNECTED) {
+          if(trace) Serial.print("wifi connected, web server stopped");
           current_state = status_not_connected;
+          server.end();
           break;
-        }
-         client = server.available();
-         if(client) {
-           last_client_activity_ms = ms;
-           current_state = status_awaiting_command;
-           if(trace) Serial.println("client connected, awaiting command");
-           break;
-         } else {
-          if(trace && every_n_ms(last_execute_ms, ms, 1000)) {
-            if(trace) Serial.print(".");
-          }
-        }
-        break;
-
-      // the first line is a command, something like "GET / HTTP/1.1" or "GET /favicon.ico HTTP/1.1"
-      case status_awaiting_command:
-        if(wifi_status != WL_CONNECTED) {
-          current_state = status_not_connected;
-          break;
-        }
-        if(!client) {
-          if(trace) Serial.println("Client disconnected");
-          client.stop();
-          current_state = status_awaiting_client;
-          break;
-        }
-
-        while(client.available()) {
-          last_client_activity_ms = ms;
-          if(line_reader.get_line(client)) {
-
-            // parse the command TODO: add error checking
-            String & l = line_reader.line;
-            int first_space = l.indexOf(" ");
-            int last_space = l.lastIndexOf(" ");
-            method = l.substring(0, first_space);
-            path = l.substring(first_space+1, last_space);
-            version = l.substring(last_space+1);
-
-            Serial.print("method: ");
-            Serial.println(method);
-            Serial.print("path: ");
-            Serial.println(path);
-            Serial.print("version: ");
-            Serial.println(version);
-
-   
-
-            if(log_serial) Serial.println(line_reader.line);
-            if(trace) Serial.println("reading header");
-            current_state = status_awaiting_header;
-            break;
-            }
-        }
-        break;
-
-      case status_awaiting_header:
-        if(wifi_status != WL_CONNECTED) {
-          current_state = status_not_connected;
-          break;
-        }
-        if(!client) {
-          if(trace) Serial.println("Client disconnected");
-          client.stop();
-          current_state = status_awaiting_client;
-          break;
-        }
-        while(client.available()) {
-          if(line_reader.get_line(client)) {
-            if(log_serial) Serial.println(line_reader.line);
-
-            // a blank line means that the header is done
-            if(line_reader.line.length()==0) {
-              if(trace) Serial.println("blank line found, sending response");
-
-              // send response from routes
-              bool found = false;
-              for(auto & route : routes) {
-                if(route.method == this->method && route.path == this->path) {
-                  found = true;
-                  route.execute(client);
-                  break;
-                }
-              }
-              if(!found) {
-                // send 404
-                client.println("HTTP/1.1 404 Not Found");
-                client.println("Content-type:text/html");
-                client.println();
-                client.println("<html><head></head><body>route not found, 404<br></body></html>");
-                client.println();
-              }
-
-
-              client.stop();
-              current_state = status_awaiting_client;
-              break;
-            }
-            else {
-              if(trace) Serial.println("waiting for blank line");
-            }
-          }
         }
         break;
 
@@ -522,7 +383,7 @@ float goal_x_position;
 enum ControlMode { manual, seeking_goal_x_position };
 ControlMode control_mode = ControlMode::manual;
 
-
+uint32_t loop_count = 0;
 
 bool page_down_requested = false;
 
@@ -562,6 +423,22 @@ void set_wheel_speed(float left_speed, float right_speed) {
   right_wheel_pid.set(right_speed);
 }
 
+void shutdown() {
+  // turn off power to peripherals
+  digitalWrite(pin_enable_ext_3v3,LOW);
+
+  // turn off pullups for i2c since they waste power
+  digitalWrite(15, LOW);
+  digitalWrite(4, LOW);
+  pinMode(15, INPUT_PULLDOWN);
+  pinMode(4, INPUT_PULLDOWN);
+
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+
+
+  esp_deep_sleep_start();
+}
+
 void cmd_set_wifi_config(CmdParser * parser) {
   char * ssid = parser->getCmdParam(1);
   char * password = parser->getCmdParam(2);
@@ -599,21 +476,7 @@ void cmd_set_goal_distance(CmdParser * parser) {
 }
 
 void cmd_shutdown(CmdParser * parser) {
-
-  // turn off power to peripherals
-  digitalWrite(pin_enable_ext_3v3,LOW);
-
-  // turn off pullups for i2c since they waste power
-  digitalWrite(15, LOW);
-  digitalWrite(4, LOW);
-  pinMode(15, INPUT_PULLDOWN);
-  pinMode(4, INPUT_PULLDOWN);
-
-  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-
-
-  esp_deep_sleep_start();
-  
+  shutdown();
 }
 
 void cmd_page_down(CmdParser * parser) {
@@ -659,21 +522,21 @@ void cmd_set_wheel_speed_pid(CmdParser * parser) {
 
   // use a position pid t find desired velocity
   static PID position_pid;
-  position_pid.max_output = 0.0;
-  position_pid.min_output = 0.0;
+  position_pid.max_output = 0.1;
+  position_pid.min_output = 0.1;
   position_pid.set(goal_x);
   auto goal_velocity = position_pid.next_output(us, pendulum_x);
 
   // use desired velocity to find desired pitch
-  static PID velocity_pid(0.1,0,0);
-  velocity_pid.max_output = 0.01;
-  velocity_pid.min_output = -0.01;
+  static PID velocity_pid(0.01,0,0);
+  velocity_pid.max_output = 0.03;
+  velocity_pid.min_output = -0.03;
   velocity_pid.set(goal_velocity);
   auto goal_pitch = velocity_pid.next_output(us, cart_velocity);
 
   // use desired pitch to get wheel_velocity
-  static PID pitch_pid(0, 0.0, 8.1  );
-  pitch_pid.set(goal_pitch);
+  static PID pitch_pid(25 , 3.0, 0.5  );
+  pitch_pid.set(goal_pitch-0.03);
   if(pitch!=last_pitch) {
     float motor_power = -1.0* pitch_pid.next_output(us, pitch);
     // static auto last_ms = millis();
@@ -707,6 +570,10 @@ void IRAM_ATTR right_a_change() {
 
 void IRAM_ATTR right_b_change() {
   sensor_b_changed(right_encoder);
+}
+
+String get_status_json() {
+  return (String)"{\"loop_count\":"+String(loop_count)+"}";
 }
 
 void setup() {
@@ -748,6 +615,8 @@ void setup() {
   pinMode(pin_right_cmd_fwd, OUTPUT);
   pinMode(pin_right_cmd_rev, OUTPUT);
   pinMode(pin_enable_ext_3v3, OUTPUT);
+
+  digitalWrite(pin_built_in__led, LOW);
 
   digitalWrite(pin_enable_ext_3v3, HIGH);
 
@@ -792,34 +661,45 @@ void setup() {
   //mpu.enable_interrupts(pin_mpu_interrupt);
   mpu.setup();
 
+  SPIFFS.begin();
+
+  // set up web server routes
+  server.on("/led_on", HTTP_GET, [](AsyncWebServerRequest *request) {
+    digitalWrite(pin_built_in__led, HIGH);  // GET /led_on turns the LED on
+    request->send(SPIFFS, "/index.html", "text/html", false, get_variable_value);
+  });
+
+  server.on("/stats", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", get_status_json());
+  });
+
+  server.on("/led_off", HTTP_GET, [](AsyncWebServerRequest *request) {
+    digitalWrite(pin_built_in__led, LOW);  // GET /led_ff turns the LED on
+    request->send(SPIFFS, "/index.html", "text/html", false, get_variable_value);
+  });
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/index.html", "text/html", false, get_variable_value);
+  });
+
+  server.on("/sleep", HTTP_PUT, [](AsyncWebServerRequest *request) {
+    shutdown();
+  });
+  
+  server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/favicon.ico", "image/x-icon", false);
+  });
+
+  server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/index.html", "text/html", false, get_variable_value);
+  });
+
+
+
   Serial.println("Setup complete");
   // put your setup code here, to run once:
 }
 
-
-
-float get_tilt_angle() {
-  // TODO: read tilt angle from gyroscope
-  return 0;
-}
-
-void control_robot(float sp_x, float sp_v, float sp_a, float height) {
-  // get the current timestamp
-  // calculate dt from last timestamp
-  // calculate the current wheel position velocity and acceleration
-  // read current theta
-  //float theta = get_tilt_angle();
-  // calculate angular velocity
-  //float top_position = wheel_x + height * sin(theta);  
-
-
-  // last_angle = angle
-  // last_wheel_osition = wheel_position
-}
-
-
 void loop() {
-  static uint32_t loop_count = 0;
   static LineReader line_reader;
   static String last_bluetooth_line;
   static unsigned long last_loop_ms = 0;
@@ -827,7 +707,6 @@ void loop() {
 
 
   if(every_n_ms(loop_ms, last_loop_ms, 1)) {
-    mpu.execute();
     wifi_task.execute();
 
     // read the button
@@ -843,9 +722,9 @@ void loop() {
     }
   }
 
-
   if(every_n_ms(loop_ms, last_loop_ms, 10)) {
     auto us = micros();
+    mpu.execute();
     left_speedometer.set_ticks(us, left_encoder.odometer_a+left_encoder.odometer_b);
     right_speedometer.set_ticks(us, right_encoder.odometer_a+right_encoder.odometer_b);
     
@@ -860,7 +739,6 @@ void loop() {
       //Serial.println((String)"pl: "+ power_left + "pr: " + power_right);
       set_motor_power(left_power, right_power);
     }
-
 
     static int current_page = 0;
     const int max_page = 2;
@@ -878,8 +756,6 @@ void loop() {
     float ax = ax_raw / 16200.0;
     float ay = ay_raw / 16700.0;
     float az = az_raw / 14800.0;
-
-
 
     display.clear();
     if (current_page == 0) {
