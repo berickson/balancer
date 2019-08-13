@@ -659,9 +659,29 @@ void setup() {
   Serial.println("Initializing mpu...");
   //delay(500);
   //mpu.enable_interrupts(pin_mpu_interrupt);
-  mpu.setup();
 
+  mpu.setup();
   SPIFFS.begin();
+  server.on(
+    "/command",
+    HTTP_POST,
+    // request
+    [](AsyncWebServerRequest * request){
+      Serial.println("got a request");
+      Serial.println(request->contentLength());
+
+      auto params=request->params();
+      for(int i=0;i<params;i++){
+        AsyncWebParameter* p = request->getParam(i);
+        if(p->isPost() && p->name() == "body") {
+          request->send(200,"text/plain",p->value());
+          return;
+        }
+      }
+      request->send(400,"text/plain","no post body sent");
+    }
+  );
+
 
   // set up web server routes
   server.on("/led_on", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -679,6 +699,10 @@ void setup() {
   });
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(SPIFFS, "/index.html", "text/html", false, get_variable_value);
+  });
+
+  server.on("/command_line.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/command_line.html", "text/html", false, get_variable_value);
   });
 
   server.on("/sleep", HTTP_PUT, [](AsyncWebServerRequest *request) {
