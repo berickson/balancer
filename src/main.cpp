@@ -674,7 +674,16 @@ void setup() {
       for(int i=0;i<params;i++){
         AsyncWebParameter* p = request->getParam(i);
         if(p->isPost() && p->name() == "body") {
-          request->send(200,"text/plain",p->value());
+          CmdParser parser;
+          String command = p->value();
+
+          parser.parseCmd((char *)command.c_str());
+          if(commands.processCmd(&parser)) {
+            request->send(200,"text/plain","ok");
+          } else {
+            request->send(200,"text/plain","command failed");
+          }
+
           return;
         }
       }
@@ -739,7 +748,6 @@ void loop() {
     // check for a new line in bluetooth
     if(line_reader.get_line(bluetooth)) {
       CmdParser parser;
-      CmdBuffer<100> buffer;
       parser.parseCmd((char *)line_reader.line.c_str());
       commands.processCmd(&parser);
       last_bluetooth_line = line_reader.line;
