@@ -377,11 +377,15 @@ Speedometer left_speedometer(0.2/982);
 Speedometer right_speedometer(0.2/1036 );
 PID left_wheel_pid;
 PID right_wheel_pid;
-CmdCallback<100> commands;
+//CmdCallback<100> commands;
 Preferences preferences;
 float goal_x_position;
 enum ControlMode { manual, seeking_goal_x_position };
 ControlMode control_mode = ControlMode::manual;
+
+static PID pitch_pid(10 , 0, 0.3  );
+static PID velocity_pid(1 , 0, 0.1  );
+
 
 uint32_t loop_count = 0;
 
@@ -439,9 +443,42 @@ void shutdown() {
   esp_deep_sleep_start();
 }
 
-void cmd_set_wifi_config(CmdParser * parser) {
-  char * ssid = parser->getCmdParam(1);
-  char * password = parser->getCmdParam(2);
+
+
+class CommandEnvironment {
+public:
+  CommandEnvironment(CmdParser & args, Stream & cout, Stream & cerr) 
+  : args(args),cout(cout),cerr(cerr)
+  {
+  }
+  CmdParser & args;
+  Stream & cout;
+  Stream & cerr;
+  bool ok = true;
+};
+
+typedef void (*CommandCallback)(CommandEnvironment &env);
+
+
+class Command {
+public:
+  Command() 
+    : execute(nullptr)
+  {}
+  Command(const char * name, CommandCallback callback, char * helpstring = nullptr) {
+    this->name = name;
+    this->execute = callback;
+    this->helpstring = helpstring;
+  }
+  String name;
+  CommandCallback execute;
+  String helpstring;
+};
+
+
+void cmd_set_wifi_config(CommandEnvironment & env) {
+  char * ssid = env.args.getCmdParam(1);
+  char * password = env.args.getCmdParam(2);
   preferences.begin("main",false);
   preferences.putString("ssid", ssid);
   preferences.putString("password", password);
@@ -449,42 +486,42 @@ void cmd_set_wifi_config(CmdParser * parser) {
   wifi_task.set_connection_info(ssid, password);
 }
 
-void cmd_set_motor_power(CmdParser * parser) {
-  double left_power = atof(parser->getCmdParam(1));
-  double right_power = atof(parser->getCmdParam(2));
+void cmd_set_motor_power(CommandEnvironment & env) {
+  double left_power = atof(env.args.getCmdParam(1));
+  double right_power = atof(env.args.getCmdParam(2));
   set_motor_power(0, left_power);
   set_motor_power(1, right_power);
 }
 
-void cmd_reset_odo(CmdParser * parser) {
+void cmd_reset_odo(CommandEnvironment & env) {
   right_encoder.reset();
   left_encoder.reset();
 }
 
-void cmd_set_enable_wifi(CmdParser * parser) {
-  bool enable_wifi = String(parser->getCmdParam(1))=="1";
+void cmd_set_enable_wifi(CommandEnvironment & env) {
+  bool enable_wifi = String(env.args.getCmdParam(1))=="1";
   wifi_task.set_enable(enable_wifi);
   preferences.begin("main");
   preferences.putBool("enable_wifi", enable_wifi);
   preferences.end();
 }
 
-void cmd_set_goal_distance(CmdParser * parser) {
-  auto distance = atof(parser->getCmdParam(1));
+void cmd_set_goal_distance(CommandEnvironment & env) {
+  auto distance = atof(env.args.getCmdParam(1));
   goal_x_position = get_x_position() + distance;
   control_mode = ControlMode::seeking_goal_x_position;
 }
 
-void cmd_shutdown(CmdParser * parser) {
+void cmd_shutdown(CommandEnvironment & env) {
   shutdown();
 }
 
-void cmd_page_down(CmdParser * parser) {
+void cmd_page_down(CommandEnvironment & env) {
   page_down_requested = true;
 }
 
-void cmd_set_peripheral_power(CmdParser * parser) {
-  bool enable = (atoi(parser->getCmdParam(1)) == 1);
+void cmd_set_peripheral_power(CommandEnvironment & env) {
+  bool enable = (atoi(env.args.getCmdParam(1)) == 1);
 
   digitalWrite(pin_enable_ext_3v3, enable);
   if(enable) {
@@ -493,23 +530,38 @@ void cmd_set_peripheral_power(CmdParser * parser) {
   } else {
     pinMode(pin_enable_ext_3v3,INPUT);
   }
-
 }
 
-void cmd_set_wheel_speed(CmdParser * parser) {
-  set_wheel_speed(atof(parser->getCmdParam(1)), atof(parser->getCmdParam(2)));
+void cmd_set_wheel_speed(CommandEnvironment & env) {
+  set_wheel_speed(atof(env.args.getCmdParam(1)), atof(env.args.getCmdParam(2)));
   control_mode = ControlMode::manual;
 }
 
-void cmd_set_wheel_speed_pid(CmdParser * parser) {
-  float k_p = atof(parser->getCmdParam(1));
-  float k_i = atof(parser->getCmdParam(2));
-  float k_d = atof(parser->getCmdParam(3));
-  bool additive = (atoi(parser->getCmdParam(4)) == 1);
+void cmd_set_wheel_speed_pid(CommandEnvironment & env) {
+  float k_p = atof(env.args.getCmdParam(1));
+  float k_i = atof(env.args.getCmdParam(2));
+  float k_d = atof(env.args.getCmdParam(3));
+  bool additive = (atoi(env.args.getCmdParam(4)) == 1);
   left_wheel_pid.set_gains(k_p, k_i, k_d, additive);
   right_wheel_pid.set_gains(k_p, k_i, k_d, additive);
 }
 
+void cmd_set_pitch_pid(CommandEnvironment & env) {
+  float k_p = atof(env.args.getCmdParam(1));
+  float k_i = atof(env.args.getCmdParam(2));
+  float k_d = atof(env.args.getCmdParam(3));
+  bool additive = (atoi(env.args.getCmdParam(4)) == 1);
+  pitch_pid.set_gains(k_p, k_i, k_d, additive);
+}
+
+
+void cmd_set_velocity_pid(CommandEnvironment & env) {
+  float k_p = atof(env.args.getCmdParam(1));
+  float k_i = atof(env.args.getCmdParam(2));
+  float k_d = atof(env.args.getCmdParam(3));
+  bool additive = (atoi(env.args.getCmdParam(4)) == 1);
+  velocity_pid.set_gains(k_p, k_i, k_d, additive);
+}
 
 
  void go_to_goal_x(float pitch, float cart_x, float cart_velocity, float goal_x) {
@@ -523,19 +575,17 @@ void cmd_set_wheel_speed_pid(CmdParser * parser) {
   // use a position pid t find desired velocity
   static PID position_pid;
   position_pid.max_output = 0.1;
-  position_pid.min_output = 0.1;
+  position_pid.min_output = -0.1;
   position_pid.set(goal_x);
   auto goal_velocity = position_pid.next_output(us, pendulum_x);
 
   // use desired velocity to find desired pitch
-  static PID velocity_pid(0.01,0,0);
   velocity_pid.max_output = 0.03;
   velocity_pid.min_output = -0.03;
   velocity_pid.set(goal_velocity);
   auto goal_pitch = velocity_pid.next_output(us, cart_velocity);
 
   // use desired pitch to get wheel_velocity
-  static PID pitch_pid(25 , 3.0, 0.5  );
   pitch_pid.set(goal_pitch-0.03);
   if(pitch!=last_pitch) {
     float motor_power = -1.0* pitch_pid.next_output(us, pitch);
@@ -576,17 +626,19 @@ String get_status_json() {
   return (String)"{\"loop_count\":"+String(loop_count)+"}";
 }
 
+std::vector<Command> commands(50);
+
+Command * get_command_by_name(const char * command_name) {
+  for(auto & command : commands) {
+    if(command.name == command_name) {
+      return &command;
+    }
+  }
+  return nullptr;
+}
+
+
 void setup() {
-  commands.addCmd("set_wifi_config", cmd_set_wifi_config);
-  commands.addCmd("set_motor_power", cmd_set_motor_power);
-  commands.addCmd("set_enable_wifi", cmd_set_enable_wifi);
-  commands.addCmd("set_peripheral_power", cmd_set_peripheral_power);
-  commands.addCmd("shutdown", cmd_shutdown);
-  commands.addCmd("page_down", cmd_page_down);
-  commands.addCmd("reset_odo", cmd_reset_odo);
-  commands.addCmd("set_wheel_speed", cmd_set_wheel_speed);
-  commands.addCmd("set_wheel_speed_pid", cmd_set_wheel_speed_pid);
-  commands.addCmd("set_goal_distance", cmd_set_goal_distance);
   preferences.begin("main", true);
   wifi_task.set_connection_info(preferences.getString("ssid"), preferences.getString("password"));
   wifi_task.set_enable(preferences.getBool("enable_wifi"));
@@ -639,7 +691,18 @@ void setup() {
 
   ledcSetup(right_cmd_rev_pwm_channel, pwm_frequency, pwm_bits);
   ledcAttachPin(pin_right_cmd_rev, right_cmd_rev_pwm_channel);
-
+  commands.emplace_back(Command{"set_wifi_config", &cmd_set_wifi_config});
+  commands.emplace_back(Command{"set_motor_power", cmd_set_motor_power});
+  commands.emplace_back(Command{"set_enable_wifi", cmd_set_enable_wifi});
+  commands.emplace_back(Command{"set_peripheral_power", cmd_set_peripheral_power});
+  commands.emplace_back(Command{"shutdown", cmd_shutdown});
+  commands.emplace_back(Command{"page_down", cmd_page_down});
+  commands.emplace_back(Command{"reset_odo", cmd_reset_odo});
+  commands.emplace_back(Command{"set_wheel_speed", cmd_set_wheel_speed});
+  commands.emplace_back(Command{"set_wheel_speed_pid", cmd_set_wheel_speed_pid});
+  commands.emplace_back(Command{"set_goal_distance", cmd_set_goal_distance});
+  commands.emplace_back(Command{"set_pitch_pid", cmd_set_pitch_pid});
+  commands.emplace_back(Command{"set_velocity_pid", cmd_set_velocity_pid});
   
    for(auto x: {0,1}) {
      set_motor_power(x,0);
@@ -650,7 +713,6 @@ void setup() {
   delay(10);
   digitalWrite(pin_oled_rst, HIGH);
   delay(100);
-
 
 
   // init display before mpu since it initializes shared i2c
@@ -675,22 +737,27 @@ void setup() {
         AsyncWebParameter* p = request->getParam(i);
         if(p->isPost() && p->name() == "body") {
           CmdParser parser;
-          String command = p->value();
+          String body = p->value();
 
-          parser.parseCmd((char *)command.c_str());
-          if(commands.processCmd(&parser)) {
-            request->send(200,"text/plain","ok");
+          parser.parseCmd((char *)body.c_str());
+          auto command = get_command_by_name(parser.getCommand());
+          if(command == nullptr) {
+              request->send(200,"text/plain","command failed");
           } else {
-            request->send(200,"text/plain","command failed");
+              CommandEnvironment env(parser, Serial, Serial);
+              command->execute(env);
+              if(env.ok) {
+                request->send(200,"text/plain","ok");
+              } else {
+                request->send(200,"text/plain","command failed");
+              }
           }
-
-          return;
         }
+        request->send(400,"text/plain","no post body sent");
       }
-      request->send(400,"text/plain","no post body sent");
     }
-  );
-
+    );
+  
 
   // set up web server routes
   server.on("/led_on", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -749,9 +816,24 @@ void loop() {
     if(line_reader.get_line(bluetooth)) {
       CmdParser parser;
       parser.parseCmd((char *)line_reader.line.c_str());
-      commands.processCmd(&parser);
+      Command * command = get_command_by_name(parser.getCommand());
+      if(command) {
+        CommandEnvironment env(parser, bluetooth, bluetooth);
+        command->execute(env);
+      } else {
+        bluetooth.print("ERROR: Command not found - ");
+        bluetooth.println(parser.getCommand());
+      }
       last_bluetooth_line = line_reader.line;
     }
+  }
+
+  if(every_n_ms(loop_ms, last_loop_ms, 500)) {
+    Serial.print("x: ");
+    Serial.print(get_x_position());
+    Serial.print(" v: ");
+    Serial.print(get_velocity());
+    Serial.println();
   }
 
   if(every_n_ms(loop_ms, last_loop_ms, 10)) {

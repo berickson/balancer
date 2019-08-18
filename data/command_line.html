@@ -45,7 +45,7 @@
   </div>
 
 
-  <div><input class='command'></input><button onclick='go()'>Go</button></div>
+  <div><input class='command'></input><button onclick='go()'>Go</button><input type="checkbox" id="keep_input"/> </div>
   <script>
 
     function time_string() {
@@ -87,7 +87,10 @@
         results.append(line_div);
       });
 
-      command.val('');
+
+      if(!$("#keep_input").is(':checked')) {
+        command.val('');
+      }
     }
   </script>
 
