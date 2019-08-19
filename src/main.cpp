@@ -29,6 +29,9 @@
 // https://github.com/me-no-dev/ESPAsyncWebServer
 #include "ESPAsyncWebServer.h"
 
+#include "StringStream.h"
+
+
 // board at https://www.amazon.com/gp/product/B07DKD79Y9
 const int oled_address=0x3c;
 const int pin_oled_sda = 4;
@@ -563,7 +566,6 @@ void cmd_set_velocity_pid(CommandEnvironment & env) {
   velocity_pid.set_gains(k_p, k_i, k_d, additive);
 }
 
-
  void go_to_goal_x(float pitch, float cart_x, float cart_velocity, float goal_x) {
   auto us = micros();
   auto pendulum_length = 0.3;
@@ -626,8 +628,16 @@ String get_status_json() {
   return (String)"{\"loop_count\":"+String(loop_count)+"}";
 }
 
-std::vector<Command> commands(50);
+std::vector<Command> commands;
 
+void cmd_help(CommandEnvironment & env) {
+  for(auto command : commands) {
+    env.cout.print(command.name);
+    env.cout.print(": ");
+    env.cout.print(command.helpstring);
+    env.cout.println();
+  }
+}
 Command * get_command_by_name(const char * command_name) {
   for(auto & command : commands) {
     if(command.name == command_name) {
@@ -691,6 +701,8 @@ void setup() {
 
   ledcSetup(right_cmd_rev_pwm_channel, pwm_frequency, pwm_bits);
   ledcAttachPin(pin_right_cmd_rev, right_cmd_rev_pwm_channel);
+  commands.reserve(50);
+  commands.emplace_back(Command{"help", &cmd_help, "displays list of available commands"});
   commands.emplace_back(Command{"set_wifi_config", &cmd_set_wifi_config});
   commands.emplace_back(Command{"set_motor_power", cmd_set_motor_power});
   commands.emplace_back(Command{"set_enable_wifi", cmd_set_enable_wifi});
@@ -744,10 +756,12 @@ void setup() {
           if(command == nullptr) {
               request->send(200,"text/plain","command failed");
           } else {
-              CommandEnvironment env(parser, Serial, Serial);
+              String output_string;
+              StringStream output_stream(output_string);
+              CommandEnvironment env(parser, output_stream, output_stream);
               command->execute(env);
               if(env.ok) {
-                request->send(200,"text/plain","ok");
+                request->send(200,"text/plain", output_string);
               } else {
                 request->send(200,"text/plain","command failed");
               }
