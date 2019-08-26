@@ -468,7 +468,7 @@ public:
   Command() 
     : execute(nullptr)
   {}
-  Command(const char * name, CommandCallback callback, char * helpstring = nullptr) {
+  Command(const char * name, CommandCallback callback, const char * helpstring = nullptr) {
     this->name = name;
     this->execute = callback;
     this->helpstring = helpstring;
@@ -487,6 +487,12 @@ void cmd_set_wifi_config(CommandEnvironment & env) {
   preferences.putString("password", password);
   preferences.end();
   wifi_task.set_connection_info(ssid, password);
+  env.cout.print("ssid set to \"");
+  env.cout.print(preferences.getString("ssid"));
+  env.cout.print("\", password set to \"");
+  env.cout.print(preferences.getString("password"));
+  env.cout.print("\"");
+  env.cout.println();
 }
 
 void cmd_set_motor_power(CommandEnvironment & env) {
@@ -555,6 +561,15 @@ void cmd_set_pitch_pid(CommandEnvironment & env) {
   float k_d = atof(env.args.getCmdParam(3));
   bool additive = (atoi(env.args.getCmdParam(4)) == 1);
   pitch_pid.set_gains(k_p, k_i, k_d, additive);
+}
+
+void cmd_get_pitch_pid(CommandEnvironment & env) {
+  env.cout.print("k_p: ");
+  env.cout.print(pitch_pid.k_p);
+  env.cout.print(", k_i: ");
+  env.cout.print(pitch_pid.k_i);
+  env.cout.print(", k_d: ");
+  env.cout.print(pitch_pid.k_d);
 }
 
 
@@ -702,8 +717,8 @@ void setup() {
   ledcSetup(right_cmd_rev_pwm_channel, pwm_frequency, pwm_bits);
   ledcAttachPin(pin_right_cmd_rev, right_cmd_rev_pwm_channel);
   commands.reserve(50);
-  commands.emplace_back(Command{"help", &cmd_help, "displays list of available commands"});
-  commands.emplace_back(Command{"set_wifi_config", &cmd_set_wifi_config});
+  commands.emplace_back(Command{"help", cmd_help, "displays list of available commands"});
+  commands.emplace_back(Command{"set_wifi_config", cmd_set_wifi_config});
   commands.emplace_back(Command{"set_motor_power", cmd_set_motor_power});
   commands.emplace_back(Command{"set_enable_wifi", cmd_set_enable_wifi});
   commands.emplace_back(Command{"set_peripheral_power", cmd_set_peripheral_power});
@@ -714,6 +729,7 @@ void setup() {
   commands.emplace_back(Command{"set_wheel_speed_pid", cmd_set_wheel_speed_pid});
   commands.emplace_back(Command{"set_goal_distance", cmd_set_goal_distance});
   commands.emplace_back(Command{"set_pitch_pid", cmd_set_pitch_pid});
+  commands.emplace_back(Command{"get_pitch_pid", cmd_get_pitch_pid});
   commands.emplace_back(Command{"set_velocity_pid", cmd_set_velocity_pid});
   
    for(auto x: {0,1}) {
@@ -891,7 +907,7 @@ void loop() {
       display.drawString(0, 10," ra:"+String(right_encoder.odometer_a)+" rb:"+String(right_encoder.odometer_b));
       display.drawString(0, 20, "lp: " + String(loop_count/1000)+String("k ") +" n:"+String(mpu.readingCount));
       display.drawString(0, 30, WiFi.localIP().toString());
-      display.drawString(0,40, (String) "pitch: " + mpu.pitch);
+      display.drawString(0,40, (String) "deg pitch: " + mpu.pitch * 180./M_PI);
       display.drawString(0, 50, (String) "vl:" + left_speedometer.get_velocity() + " vr: " + right_speedometer.get_velocity());
     display.display();
 

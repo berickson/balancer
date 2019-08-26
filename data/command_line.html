@@ -2,18 +2,23 @@
 
 <html>
 <style>
+  * { box-sizing: border-box; }
+
   .result_box {
     font-family: "Lucida Console", Monaco, monospace;
     font-size: 9pt;
     position: relative;
     height: 480px;
-    width: 640px;
+  
     background-color: rgb(30, 30, 30);
   }
 
   .results {
     position: absolute;
-    bottom: 0px;
+    bottom: 0;
+    max-height: 100%;
+    width: 100%;
+    overflow: auto;
   }
 
   .time_text {
@@ -29,7 +34,10 @@
 
   .result_text {
     color: lime;
-    display: inline;
+    display:inline-block;
+    vertical-align: top;
+    white-space: pre-line;
+    
   }
 </style>
 
@@ -45,7 +53,7 @@
   </div>
 
 
-  <div><input class='command'></input><button onclick='go()'>Go</button><input type="checkbox" id="keep_input"/> </div>
+  <div><input class='command'></input><button onclick='go()'>Go</button><input type="checkbox" id="keep_input" checked/>keep input</div>
   <script>
 
     function time_string() {
@@ -66,13 +74,14 @@
 
 
     function go() {
-      var results = $('.results');
+      var results = $('.results')
       var command = $('.command');
       var line_div = $('<div>');
       var time_div = $('<div>').addClass('time_text').text(time_string());
       var command_div = $('<div>').addClass('command_text').text(command.val())
       line_div.append(time_div).append(command_div);
       results.append(line_div);
+      results[0].scrollTop = results[0].scrollHeight; // scroll to bottom
 
       $.ajax({
         method: "POST",
@@ -85,6 +94,7 @@
         var result_div = $('<div>').addClass('result_text').text(msg)
         line_div.append(time_div).append(result_div);
         results.append(line_div);
+        results[0].scrollTop = results[0].scrollHeight; // scroll to bottom
       });
 
 
