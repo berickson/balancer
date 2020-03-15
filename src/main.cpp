@@ -383,10 +383,10 @@ PID right_wheel_pid;
 //CmdCallback<100> commands;
 Preferences preferences;
 float goal_x_position;
-enum ControlMode { manual, seeking_goal_x_position };
+enum ControlMode { manual, seeking_goal_x_position, motor_power };
 ControlMode control_mode = ControlMode::manual;
 
-static PID pitch_pid(10 , 0, 0.3  );
+static PID pitch_pid(3 , 0, 0.1  );
 static PID velocity_pid(1 , 0, 0.1  );
 
 
@@ -500,6 +500,8 @@ void cmd_set_motor_power(CommandEnvironment & env) {
   double right_power = atof(env.args.getCmdParam(2));
   set_motor_power(0, left_power);
   set_motor_power(1, right_power);
+  control_mode = ControlMode::motor_power;
+  env.cout.println("ok");
 }
 
 void cmd_reset_odo(CommandEnvironment & env) {
@@ -583,7 +585,7 @@ void cmd_set_velocity_pid(CommandEnvironment & env) {
 
  void go_to_goal_x(float pitch, float cart_x, float cart_velocity, float goal_x) {
   auto us = micros();
-  auto pendulum_length = 0.3;
+  auto pendulum_length = 0.1;
   static float last_pitch = 0;
   
   //  from the pendulums point of view
@@ -597,13 +599,14 @@ void cmd_set_velocity_pid(CommandEnvironment & env) {
   auto goal_velocity = position_pid.next_output(us, pendulum_x);
 
   // use desired velocity to find desired pitch
-  velocity_pid.max_output = 0.03;
-  velocity_pid.min_output = -0.03;
+  velocity_pid.max_output = 5*M_PI/180.;
+  velocity_pid.min_output = -5*M_PI/180.;
   velocity_pid.set(goal_velocity);
   auto goal_pitch = velocity_pid.next_output(us, cart_velocity);
 
   // use desired pitch to get wheel_velocity
-  pitch_pid.set(goal_pitch-0.03);
+  const auto zero_pitch = -3.5*M_PI/180;
+  pitch_pid.set(goal_pitch+zero_pitch);
   if(pitch!=last_pitch) {
     float motor_power = -1.0* pitch_pid.next_output(us, pitch);
     // static auto last_ms = millis();
@@ -858,7 +861,7 @@ void loop() {
     }
   }
 
-  if(every_n_ms(loop_ms, last_loop_ms, 500)) {
+  if(false && every_n_ms(loop_ms, last_loop_ms, 500)) {
     Serial.print("x: ");
     Serial.print(get_x_position());
     Serial.print(" v: ");
@@ -877,6 +880,8 @@ void loop() {
 
     if(control_mode == ControlMode::seeking_goal_x_position) {
       go_to_goal_x(mpu.pitch, get_x_position(), get_velocity(), goal_x_position);
+    } else if (control_mode == ControlMode::motor_power) {
+      ;
     } else {
       left_power = left_wheel_pid.next_output(us, left_speedometer.get_velocity(), left_speedometer.get_smooth_acceleration());
       right_power = right_wheel_pid.next_output(us, right_speedometer.get_velocity(), right_speedometer.get_smooth_acceleration());
