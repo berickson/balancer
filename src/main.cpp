@@ -412,7 +412,13 @@ void set_motor_power(int which, float power) {
   int channel_rev = (which==0) ? left_cmd_rev_pwm_channel : right_cmd_rev_pwm_channel;
   int power_channel = (power>0) ? channel_fwd : channel_rev;
   int zero_channel = (power>0) ? channel_rev : channel_fwd;
-  uint32_t duty = uint32_t(255*fabs(power));
+  int min_duty = 16; // duty cycle when wheel almost begins to spin
+  int max_duty = 255; // full speed
+  int range = max_duty - min_duty;
+  int n_power = fabs(power * range);
+  int duty = (n_power == 0 ) ? 0 : n_power + min_duty; 
+  // int percent_power = fabs(power*255)
+  // uint32_t duty = uint32_t(255*fabs(power));
   //Serial.println("set_motor_speed channel: "+String(power_channel) + "zero_channel: " + String(zero_channel) + " duty: " + String(duty));
   ledcWrite(power_channel, duty);
   ledcWrite(zero_channel, 0);
