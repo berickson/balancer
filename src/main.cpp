@@ -81,6 +81,7 @@ class BlackBox {
 
 public:
   const char * file_path = "/black_box.csv";
+  uint32_t reset_ms = 0;
   struct Entry {
     uint32_t ms = 0;
     float pitch = NAN;
@@ -112,6 +113,7 @@ public:
     }
   }
   void reset() {
+    reset_ms = millis();
     entries.clear();
   }
 
@@ -965,7 +967,7 @@ void loop() {
       if(abs(mpu.pitch) < 40. * DEG_TO_RAD) {
         go_to_goal_x(mpu.pitch, get_x_position(), get_velocity(), goal_x_position);
         BlackBox::Entry entry;
-        entry.ms = millis();
+        entry.ms = millis()-black_box.reset_ms;
         entry.pitch = mpu.pitch;
         entry.left_power = g_left_power;
         entry.left_position = left_speedometer.get_meters_travelled();
