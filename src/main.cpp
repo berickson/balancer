@@ -852,7 +852,8 @@ void setup() {
           if(command == nullptr) {
               request->send(200,"text/plain","command failed");
           } else {
-              String output_string;
+              static String output_string;
+              output_string.reserve(500*30);
               StringStream output_stream(output_string);
               CommandEnvironment env(parser, output_stream, output_stream);
               command->execute(env);
