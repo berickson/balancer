@@ -61,7 +61,8 @@ RIGHT_CMD_REV | MCC.INT3 MCU.32
 RIGHT_CMD_FWD | MCC.INT4 MCU.33
 
 # TODO
-[] stop running once it falls over
-[] record data while trying to balance
-[] api to get recorded data
+[ ] Extract shared esp32 code, use in crane
+[X] stop running once it falls over
+[X] record data while trying to balance
+[X] api to get recorded data
 
