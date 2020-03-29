@@ -69,6 +69,37 @@ bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long
 }
 
 
+class BlackBox {
+
+public:
+  struct Entry {
+    uint32_t ms = 0;
+    float pitch = NAN;
+    float left_power = NAN;
+    float right_power = NAN;
+    static String csv_header() {
+      return "ms,pitch,left_power,right_power";
+    }
+    String csv_line() {
+      return String(ms)+","+String(pitch)+","+String(left_power)+","+String(right_power);
+    }
+  };
+
+  const int capacity = 500;
+  std::vector<BlackBox::Entry> entries;
+  BlackBox() {
+    entries.reserve(capacity);
+  }
+  void add_entry(const BlackBox::Entry & entry) {
+    if(entries.size() < capacity) {
+      entries.emplace_back(entry);
+    }
+  }
+  void reset() {
+    entries.clear();
+  }
+};
+
 
 class Button {
 public:
@@ -385,6 +416,10 @@ Preferences preferences;
 float goal_x_position;
 enum ControlMode { manual, seeking_goal_x_position, motor_power };
 ControlMode control_mode = ControlMode::manual;
+BlackBox black_box;
+
+float g_left_power = 0;
+float g_right_power = 0;
 
 static PID pitch_pid(3 , 0, 0.1  );
 static PID velocity_pid(1 , 0, 0.1  );
@@ -408,6 +443,11 @@ float get_velocity() {
 
 // which = 0 for left, 1 for right
 void set_single_motor_power(int which, float power) {
+  if(which == 0) {
+    g_left_power = power;
+  } else {
+    g_right_power = power;
+  }
   int channel_fwd = (which==0) ? left_cmd_fwd_pwm_channel : right_cmd_fwd_pwm_channel;
   int channel_rev = (which==0) ? left_cmd_rev_pwm_channel : right_cmd_rev_pwm_channel;
   int power_channel = (power>0) ? channel_fwd : channel_rev;
@@ -508,8 +548,8 @@ void cmd_set_wifi_config(CommandEnvironment & env) {
 void cmd_set_motor_power(CommandEnvironment & env) {
   double left_power = atof(env.args.getCmdParam(1));
   double right_power = env.args.getParamCount() == 1 ? left_power : atof(env.args.getCmdParam(2));
-  set_motor_power(0, left_power);
-  set_motor_power(1, right_power);
+  set_single_motor_power(0, left_power);
+  set_single_motor_power(1, right_power);
   control_mode = ControlMode::motor_power;
   env.cout.println("ok");
 }
@@ -527,10 +567,24 @@ void cmd_set_enable_wifi(CommandEnvironment & env) {
   preferences.end();
 }
 
-void cmd_set_goal_distance(CommandEnvironment & env) {
-  auto distance = atof(env.args.getCmdParam(1));
+void set_goal_distance(float distance) {
   goal_x_position = get_x_position() + distance;
   control_mode = ControlMode::seeking_goal_x_position;
+}
+
+void cmd_go(CommandEnvironment & env) {
+  float distance = 0;
+  if(env.args.getParamCount() == 1) {
+    distance = atof(env.args.getCmdParam(1));
+  }
+  goal_x_position = get_x_position() + distance;
+  control_mode = ControlMode::seeking_goal_x_position;
+  black_box.reset();
+  env.cout.println("set target distance to " + String(distance));
+}
+
+void cmd_stop(CommandEnvironment & env) {
+  set_motor_power(0);
 }
 
 void cmd_shutdown(CommandEnvironment & env) {
@@ -593,7 +647,14 @@ void cmd_set_velocity_pid(CommandEnvironment & env) {
   velocity_pid.set_gains(k_p, k_i, k_d, additive);
 }
 
- void go_to_goal_x(float pitch, float cart_x, float cart_velocity, float goal_x) {
+void cmd_get_black_box(CommandEnvironment & env) {
+  env.cout.println(BlackBox::Entry::csv_header());
+  for(auto & entry : black_box.entries) {
+    env.cout.println(entry.csv_line());
+  }
+}
+
+void go_to_goal_x(float pitch, float cart_x, float cart_velocity, float goal_x) {
   auto us = micros();
   auto pendulum_length = 0.1;
   static float last_pitch = 0;
@@ -740,13 +801,15 @@ void setup() {
   commands.emplace_back(Command{"reset_odo", cmd_reset_odo});
   commands.emplace_back(Command{"set_wheel_speed", cmd_set_wheel_speed});
   commands.emplace_back(Command{"set_wheel_speed_pid", cmd_set_wheel_speed_pid});
-  commands.emplace_back(Command{"set_goal_distance", cmd_set_goal_distance});
+  commands.emplace_back(Command{"go", cmd_go});
+  commands.emplace_back(Command{"stop", cmd_stop, "Emergency stop, sets motor power to zero"});
   commands.emplace_back(Command{"set_pitch_pid", cmd_set_pitch_pid});
   commands.emplace_back(Command{"get_pitch_pid", cmd_get_pitch_pid});
   commands.emplace_back(Command{"set_velocity_pid", cmd_set_velocity_pid});
+  commands.emplace_back(Command{"get_black_box", cmd_get_black_box, "returns last recording as csv"});
   
    for(auto x: {0,1}) {
-     set_motor_power(x,0);
+     set_single_motor_power(x,0);
    }
 
 
@@ -891,6 +954,12 @@ void loop() {
     if(control_mode == ControlMode::seeking_goal_x_position) {
       if(abs(mpu.pitch) < 40. * DEG_TO_RAD) {
         go_to_goal_x(mpu.pitch, get_x_position(), get_velocity(), goal_x_position);
+        BlackBox::Entry entry;
+        entry.ms = millis();
+        entry.pitch = mpu.pitch;
+        entry.left_power = g_left_power;
+        entry.right_power = g_right_power;
+        black_box.add_entry(entry);
       } else {
         set_motor_power(0);
         control_mode = ControlMode::motor_power;
@@ -903,7 +972,9 @@ void loop() {
       //Serial.println((String)"pl: "+ power_left + "pr: " + power_right);
       set_motor_power(left_power, right_power);
     }
+  }
 
+  if(every_n_ms(loop_ms, last_loop_ms, 100)) {
     static int current_page = 0;
     const int max_page = 2;
     if(page_down_requested) {
