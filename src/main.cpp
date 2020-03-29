@@ -6,7 +6,15 @@
 #include "SSD1306.h"
 #include "OLEDDisplay.h"
 #include "math.h"
-#include "BluetoothSerial.h"
+/*
+with bluetooth
+RAM:   [==        ]  18.6% (used 61044 bytes from 327680 bytes)
+Flash: [=====     ]  46.4% (used 1460578 bytes from 3145728 bytes)
+
+without
+RAM:   [=         ]  12.7% (used 41632 bytes from 327680 bytes)
+Flash: [===       ]  27.0% (used 850670 bytes from 3145728 bytes)
+*/
 #include "WiFi.h"
 #include "functional"
 #include <vector>
@@ -157,7 +165,6 @@ class LineReader {
   const uint32_t buffer_size = 500;
   String buffer;
   String line;
-  BluetoothSerial bluetooth;
   bool line_available = true;
 
   LineReader() {
@@ -401,8 +408,6 @@ public:
 
 // globals
 Button button;
-const uint32_t bluetooth_buffer_reserve = 500;
-BluetoothSerial bluetooth;
 Mpu6050Wrapper mpu;
 WifiTask wifi_task;
 QuadratureEncoder left_encoder(pin_left_a, pin_left_b);
@@ -745,8 +750,7 @@ void setup() {
 
   Serial.begin(921600);
   button.init(pin_touch);
-  bluetooth.begin("bke");
-
+  
   left_encoder.init();
   right_encoder.init();
   attachInterrupt(pin_left_a, left_a_change, CHANGE);
@@ -906,11 +910,8 @@ void setup() {
 }
 
 void loop() {
-  static LineReader line_reader;
-  static String last_bluetooth_line;
   static unsigned long last_loop_ms = 0;
   unsigned long loop_ms = millis();
-
 
   if(every_n_ms(loop_ms, last_loop_ms, 1)) {
     wifi_task.execute();
@@ -918,20 +919,6 @@ void loop() {
     // read the button
     button.execute();
 
-    // check for a new line in bluetooth
-    if(line_reader.get_line(bluetooth)) {
-      CmdParser parser;
-      parser.parseCmd((char *)line_reader.line.c_str());
-      Command * command = get_command_by_name(parser.getCommand());
-      if(command) {
-        CommandEnvironment env(parser, bluetooth, bluetooth);
-        command->execute(env);
-      } else {
-        bluetooth.print("ERROR: Command not found - ");
-        bluetooth.println(parser.getCommand());
-      }
-      last_bluetooth_line = line_reader.line;
-    }
   }
 
   if(false && every_n_ms(loop_ms, last_loop_ms, 500)) {
