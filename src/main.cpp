@@ -80,16 +80,24 @@ bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long
 class BlackBox {
 
 public:
+  const char * file_path = "/black_box.csv";
   struct Entry {
     uint32_t ms = 0;
     float pitch = NAN;
     float left_power = NAN;
-    float right_power = NAN;
+    float left_position = NAN;
+    float left_velocity = NAN;
+    float left_smooth_velocity = NAN;
     static String csv_header() {
-      return "ms,pitch,left_power,right_power";
+      return "ms,pitch,left_power,left_position,left_velocity,left_smooth_velocity";
     }
     String csv_line() {
-      return String(ms)+","+String(pitch)+","+String(left_power)+","+String(right_power);
+      return String(ms)
+        +","+String(pitch)
+        +","+String(left_power)
+        +","+String(left_position)
+        +","+String(left_velocity)
+        +","+String(left_smooth_velocity);
     }
   };
 
@@ -105,6 +113,15 @@ public:
   }
   void reset() {
     entries.clear();
+  }
+
+  void write_to_disk() {
+    if(SPIFFS.exists(file_path)) SPIFFS.remove(file_path);
+    fs::File file = SPIFFS.open(file_path, "w");
+    file.println(Entry::csv_header());
+    for(auto & entry : entries) {
+      file.println(entry.csv_line());
+    }
   }
 };
 
@@ -886,7 +903,12 @@ void setup() {
   });
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(SPIFFS, "/index.html", "text/html", false, get_variable_value);
+  });  
+  
+  server.on("/black_box.csv", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/black_box.csv", "text/csv", false, get_variable_value);
   });
+
 
   server.on("/command_line.html", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(SPIFFS, "/command_line.html", "text/html", false, get_variable_value);
@@ -946,11 +968,14 @@ void loop() {
         entry.ms = millis();
         entry.pitch = mpu.pitch;
         entry.left_power = g_left_power;
-        entry.right_power = g_right_power;
+        entry.left_position = left_speedometer.get_meters_travelled();
+        entry.left_velocity = left_speedometer.get_velocity();
+        entry.left_smooth_velocity = left_speedometer.get_smooth_velocity();
         black_box.add_entry(entry);
       } else {
         set_motor_power(0);
         control_mode = ControlMode::motor_power;
+        black_box.write_to_disk();
       }
     } else if (control_mode == ControlMode::motor_power) {
       ;
