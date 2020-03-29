@@ -407,7 +407,7 @@ float get_velocity() {
 
 
 // which = 0 for left, 1 for right
-void set_motor_power(int which, float power) {
+void set_single_motor_power(int which, float power) {
   int channel_fwd = (which==0) ? left_cmd_fwd_pwm_channel : right_cmd_fwd_pwm_channel;
   int channel_rev = (which==0) ? left_cmd_rev_pwm_channel : right_cmd_rev_pwm_channel;
   int power_channel = (power>0) ? channel_fwd : channel_rev;
@@ -425,8 +425,12 @@ void set_motor_power(int which, float power) {
 }
 
 void set_motor_power(float left, float right) {
-  set_motor_power(0, left);
-  set_motor_power(1, right);
+  set_single_motor_power(0, left);
+  set_single_motor_power(1, right);
+}
+
+void set_motor_power(float both) {
+  set_motor_power(both, both);
 }
 
 void set_wheel_speed(float left_speed, float right_speed) {
@@ -503,7 +507,7 @@ void cmd_set_wifi_config(CommandEnvironment & env) {
 
 void cmd_set_motor_power(CommandEnvironment & env) {
   double left_power = atof(env.args.getCmdParam(1));
-  double right_power = atof(env.args.getCmdParam(2));
+  double right_power = env.args.getParamCount() == 1 ? left_power : atof(env.args.getCmdParam(2));
   set_motor_power(0, left_power);
   set_motor_power(1, right_power);
   control_mode = ControlMode::motor_power;
@@ -885,7 +889,12 @@ void loop() {
     static float right_power = 0;
 
     if(control_mode == ControlMode::seeking_goal_x_position) {
-      go_to_goal_x(mpu.pitch, get_x_position(), get_velocity(), goal_x_position);
+      if(abs(mpu.pitch) < 40. * DEG_TO_RAD) {
+        go_to_goal_x(mpu.pitch, get_x_position(), get_velocity(), goal_x_position);
+      } else {
+        set_motor_power(0);
+        control_mode = ControlMode::motor_power;
+      }
     } else if (control_mode == ControlMode::motor_power) {
       ;
     } else {
