@@ -5,7 +5,8 @@ I started this project as an excuse to play around with the an Heltech ESP32.
 
 The goal is to build a self-balancing two-wheeled robot while learning about the ESP32 along the way.
 
-So far, I haven't built the robot itself, but the project demonstrates:
+
+The project demonstrates:
 
 
 - Simultaneous WIFI and Bluetooth
@@ -13,6 +14,10 @@ So far, I haven't built the robot itself, but the project demonstrates:
 - Creating virtual buttons with touch inputs
 - Displaying output via built in OLED display
 - Web server with restful API
+
+# Status
+The robot is built and running but it doesn't reliably balance itself yet.
+
 
 # ESP32 Pinout
 Image from https://github.com/Heltec-Aaron-Lee/WiFi_Kit_series/blob/master/PinoutDiagram/WIFI%20Kit%2032.pdf
@@ -54,4 +59,9 @@ LEFT_CMD_FWD | MCC.INT1 MCU.34
 LEFT_CMD_REV | MCC.INT2 MCU.35
 RIGHT_CMD_REV | MCC.INT3 MCU.32
 RIGHT_CMD_FWD | MCC.INT4 MCU.33
+
+# TODO
+[] stop running once it falls over
+[] record data while trying to balance
+[] api to get recorded data
 
