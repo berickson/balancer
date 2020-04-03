@@ -178,7 +178,7 @@ public:
   }
 };
 
-
+/*
 class LineReader {
   public:
   const uint32_t buffer_size = 500;
@@ -209,16 +209,19 @@ class LineReader {
   }
   
 };
+*/
 
 const int wifi_port = 80;
 //const int wifi_max_clients = 1;
 AsyncWebServer server(wifi_port);
 
+/*
 struct HttpRoute {
   String method;
   String path;
   std::function< void(WiFiClient & client) > execute;
 };
+*/
 
 
 
@@ -238,7 +241,6 @@ String get_variable_value(const String& var)
 
 class WifiTask {
 public:
-  LineReader line_reader;
   WiFiClient client;
   unsigned long connect_start_ms = 0;
   unsigned long last_execute_ms = 0;
@@ -355,9 +357,8 @@ public:
   float k_p=1;
   float k_i=1;
   float k_d=0;
-  bool additive = false;
 
-  float max_i_contribution = 1.0;
+  float max_i_contribution = 0.05;
   float max_output = 1;
   float min_output = -1;
   float output = 0;
@@ -372,15 +373,14 @@ public:
 
 public:
 
-  PID(float k_p=1.0, float k_i=0, float k_d=0, bool additive=false) {
-    set_gains(k_p, k_i, k_d, additive);
+  PID(float k_p=1.0, float k_i=0, float k_d=0) {
+    set_gains(k_p, k_i, k_d);
   }
 
-  void set_gains(float k_p, float k_i, float k_d, bool additive) {
+  void set_gains(float k_p, float k_i, float k_d) {
     this->k_p = k_p;
     this->k_i = k_i;
     this->k_d = k_d;
-    this->additive = additive;
   }
 
   void reset() {
@@ -413,14 +413,8 @@ public:
       error_i = max_i_contribution / k_i;
     }
 
-    float power = k_p * error_p + k_i * error_i + k_d * error_d;
-    power = constrain(power, min_output, max_output);
-    if(additive) {
-      output += power;
-    } else {
-      output = power;
-    }
-    constrain(output, min_output, max_output);
+    float output = k_p * error_p + k_i * error_i + k_d * error_d;
+    output = constrain(output, min_output, max_output);
     return output;
   }
 };
@@ -445,7 +439,7 @@ BlackBox black_box;
 float g_left_power = 0;
 float g_right_power = 0;
 
-static PID pitch_pid(3 , 0, 0.1  );
+static PID pitch_pid(0.9 , 0, 0.03 );
 static PID velocity_pid(1 , 0, 0.1  );
 
 
@@ -609,6 +603,8 @@ void cmd_go(CommandEnvironment & env) {
 
 void cmd_stop(CommandEnvironment & env) {
   set_motor_power(0);
+  control_mode = ControlMode::motor_power;
+
 }
 
 void cmd_shutdown(CommandEnvironment & env) {
@@ -640,17 +636,15 @@ void cmd_set_wheel_speed_pid(CommandEnvironment & env) {
   float k_p = atof(env.args.getCmdParam(1));
   float k_i = atof(env.args.getCmdParam(2));
   float k_d = atof(env.args.getCmdParam(3));
-  bool additive = (atoi(env.args.getCmdParam(4)) == 1);
-  left_wheel_pid.set_gains(k_p, k_i, k_d, additive);
-  right_wheel_pid.set_gains(k_p, k_i, k_d, additive);
+  left_wheel_pid.set_gains(k_p, k_i, k_d);
+  right_wheel_pid.set_gains(k_p, k_i, k_d);
 }
 
 void cmd_set_pitch_pid(CommandEnvironment & env) {
   float k_p = atof(env.args.getCmdParam(1));
   float k_i = atof(env.args.getCmdParam(2));
   float k_d = atof(env.args.getCmdParam(3));
-  bool additive = (atoi(env.args.getCmdParam(4)) == 1);
-  pitch_pid.set_gains(k_p, k_i, k_d, additive);
+  pitch_pid.set_gains(k_p, k_i, k_d);
 }
 
 void cmd_get_pitch_pid(CommandEnvironment & env) {
@@ -660,6 +654,7 @@ void cmd_get_pitch_pid(CommandEnvironment & env) {
   env.cout.print(pitch_pid.k_i);
   env.cout.print(", k_d: ");
   env.cout.print(pitch_pid.k_d);
+  env.cout.println();
 }
 
 
@@ -667,8 +662,7 @@ void cmd_set_velocity_pid(CommandEnvironment & env) {
   float k_p = atof(env.args.getCmdParam(1));
   float k_i = atof(env.args.getCmdParam(2));
   float k_d = atof(env.args.getCmdParam(3));
-  bool additive = (atoi(env.args.getCmdParam(4)) == 1);
-  velocity_pid.set_gains(k_p, k_i, k_d, additive);
+  velocity_pid.set_gains(k_p, k_i, k_d);
 }
 
 void cmd_get_black_box(CommandEnvironment & env) {
@@ -700,7 +694,8 @@ void go_to_goal_x(float pitch, float cart_x, float cart_velocity, float goal_x) 
   auto goal_pitch = velocity_pid.next_output(us, cart_velocity);
 
   // use desired pitch to get wheel_velocity
-  const auto zero_pitch = -3.5*M_PI/180;
+  //goal_pitch = 0;
+  const auto zero_pitch = 0;// -3.5*M_PI/180;
   pitch_pid.set(goal_pitch+zero_pitch);
   if(pitch!=last_pitch) {
     float motor_power = -1.0* pitch_pid.next_output(us, pitch);
@@ -778,8 +773,8 @@ void setup() {
   attachInterrupt(pin_right_b, right_b_change, CHANGE);
 
 
-  left_wheel_pid.set_gains(3.0, 15.0, 0, false);
-  right_wheel_pid.set_gains(3.0, 15.0, 0, false);
+  left_wheel_pid.set_gains(3.0, 15.0, 0);
+  right_wheel_pid.set_gains(3.0, 15.0, 0);
 
   pinMode(pin_oled_rst, OUTPUT);
   pinMode(pin_built_in__led, OUTPUT);
@@ -816,8 +811,8 @@ void setup() {
   commands.reserve(50);
   commands.emplace_back(Command{"help", cmd_help, "displays list of available commands"});
   commands.emplace_back(Command{"set_wifi_config", cmd_set_wifi_config});
-  commands.emplace_back(Command{"set_motor_power", cmd_set_motor_power});
   commands.emplace_back(Command{"set_enable_wifi", cmd_set_enable_wifi});
+  commands.emplace_back(Command{"set_motor_power", cmd_set_motor_power});
   commands.emplace_back(Command{"set_peripheral_power", cmd_set_peripheral_power});
   commands.emplace_back(Command{"shutdown", cmd_shutdown});
   commands.emplace_back(Command{"page_down", cmd_page_down});
@@ -831,10 +826,8 @@ void setup() {
   commands.emplace_back(Command{"set_velocity_pid", cmd_set_velocity_pid});
   commands.emplace_back(Command{"get_black_box", cmd_get_black_box, "returns last recording as csv"});
   
-   for(auto x: {0,1}) {
-     set_single_motor_power(x,0);
-   }
-
+  set_motor_power(0);
+  control_mode = ControlMode::motor_power;
 
   digitalWrite(pin_oled_rst, LOW);
   delay(10);
@@ -873,6 +866,7 @@ void setup() {
           } else {
               static String output_string;
               output_string.reserve(500*30);
+              output_string.clear();
               StringStream output_stream(output_string);
               CommandEnvironment env(parser, output_stream, output_stream);
               command->execute(env);
