@@ -1,4 +1,4 @@
-#include <Arduino.h>
+#include "esp32-common.h"
 
 //#include "I2Cdev.h"
 
@@ -40,12 +40,6 @@ Flash: [===       ]  27.0% (used 850670 bytes from 3145728 bytes)
 #include "StringStream.h"
 
 
-// board at https://www.amazon.com/gp/product/B07DKD79Y9
-const int oled_address=0x3c;
-const int pin_oled_sda = 4;
-const int pin_oled_sdl = 15;
-const int pin_oled_rst = 16;
-
 const int pin_left_a = 27;
 const int pin_left_b = 14;
 const int pin_right_b = 12;
@@ -69,12 +63,6 @@ const uint8_t left_cmd_fwd_pwm_channel = 0;
 const uint8_t left_cmd_rev_pwm_channel = 1;
 const uint8_t right_cmd_fwd_pwm_channel = 2;
 const uint8_t right_cmd_rev_pwm_channel = 3;
-
-SSD1306 display(oled_address, pin_oled_sda, pin_oled_sdl);
-
-bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long ms) {
-  return (last_loop_ms % ms) + (loop_ms - last_loop_ms) >= ms;
-}
 
 
 class BlackBox {
@@ -211,19 +199,6 @@ class LineReader {
 };
 */
 
-const int wifi_port = 80;
-//const int wifi_max_clients = 1;
-AsyncWebServer server(wifi_port);
-
-/*
-struct HttpRoute {
-  String method;
-  String path;
-  std::function< void(WiFiClient & client) > execute;
-};
-*/
-
-
 
 String get_led_state_name() {
   return digitalRead(pin_built_in__led)?"ON":"OFF";
@@ -237,120 +212,6 @@ String get_variable_value(const String& var)
 
   return String();
 }
-
-
-class WifiTask {
-public:
-  WiFiClient client;
-  unsigned long connect_start_ms = 0;
-  unsigned long last_execute_ms = 0;
-  unsigned long last_client_activity_ms = 0;
-  String ssid;
-  String password;
-
-  String method="";  // GET, PUT, ETC.
-  String path="";    // URI
-  String version=""; // HTTP Version
-
-
-  bool enabled=false;
-  bool trace = false;
-  bool log_serial = true;
-
-  enum {
-    status_disabled,
-    status_not_connected,
-    status_connecting,
-    status_awaiting_client,
-    status_awaiting_command,
-    status_awaiting_header
-  } current_state = status_disabled;
-
-  void set_enable(bool enable_wifi) {
-    if(enable_wifi==this->enabled) return;
-    enabled = enable_wifi;
-    if(enabled) {
-      current_state = status_not_connected;
-    } else {
-      WiFi.disconnect(true, true);
-      current_state = status_disabled;
-    }
-  }
-
-  void set_connection_info(String ssid, String password) {
-    WiFi.disconnect();
-    this->ssid = ssid;
-    this->password = password;
-    if(current_state != status_disabled) {
-      current_state = status_not_connected;
-    }
-
-    Serial.print("connection info set to ssid: ");
-    Serial.print(ssid);
-    Serial.print(" password: ");
-    Serial.print(password);
-    Serial.println();
-  }
-
-
-  void execute() {
-    auto ms = millis();
-    auto wifi_status = WiFi.status();
-
-
-    switch (current_state) {
-      case status_disabled:
-        break;
-
-      case status_not_connected:
-        connect_start_ms = ms;
-        WiFi.mode(WIFI_STA);
-        esp_wifi_set_ps (WIFI_PS_NONE);
-        WiFi.begin(ssid.c_str(), password.c_str());
-        current_state = status_connecting;
-        break;
-      
-      case status_connecting:
-        if(wifi_status == WL_CONNECT_FAILED) {
-          current_state = status_not_connected;
-          if(trace) Serial.println("connection failed");
-          current_state = status_not_connected;
-          break;
-        }
-        if (wifi_status == WL_CONNECTED) {
-          server.begin();
-          current_state = status_awaiting_client;
-          if(trace) Serial.print("wifi connected, web server started");
-        } else {
-          // if(every_n_ms(last_execute_ms, ms, 1000)) {
-          //   Serial.print(wifi_status);
-          // }
-          if(ms - connect_start_ms > 5000) {
-            if(trace) Serial.print("couldn't connect, trying again");
-            WiFi.disconnect();
-            current_state = status_not_connected;
-            break;
-          }
-        }
-        break;
-
-      case status_awaiting_client:
-        if (wifi_status != WL_CONNECTED) {
-          if(trace) Serial.print("wifi connected, web server stopped");
-          current_state = status_not_connected;
-          server.end();
-          break;
-        }
-        break;
-
-
-      default:
-        Serial.println("invalid sate in WifiTask");
-    }
-    last_execute_ms = ms;
-  }
-
-};
 
 class PID {
 public:
@@ -422,15 +283,12 @@ public:
 // globals
 Button button;
 Mpu6050Wrapper mpu;
-WifiTask wifi_task;
 QuadratureEncoder left_encoder(pin_left_a, pin_left_b);
 QuadratureEncoder right_encoder(pin_right_a, pin_right_b);
 Speedometer left_speedometer(0.2/982);
 Speedometer right_speedometer(0.2/1036 );
 PID left_wheel_pid;
 PID right_wheel_pid;
-//CmdCallback<100> commands;
-Preferences preferences;
 float goal_x_position;
 enum ControlMode { manual, seeking_goal_x_position, motor_power };
 ControlMode control_mode = ControlMode::manual;
@@ -514,54 +372,6 @@ void shutdown() {
   esp_deep_sleep_start();
 }
 
-
-
-class CommandEnvironment {
-public:
-  CommandEnvironment(CmdParser & args, Stream & cout, Stream & cerr) 
-  : args(args),cout(cout),cerr(cerr)
-  {
-  }
-  CmdParser & args;
-  Stream & cout;
-  Stream & cerr;
-  bool ok = true;
-};
-
-typedef void (*CommandCallback)(CommandEnvironment &env);
-
-
-class Command {
-public:
-  Command() 
-    : execute(nullptr)
-  {}
-  Command(const char * name, CommandCallback callback, const char * helpstring = nullptr) {
-    this->name = name;
-    this->execute = callback;
-    this->helpstring = helpstring;
-  }
-  String name;
-  CommandCallback execute;
-  String helpstring;
-};
-
-
-void cmd_set_wifi_config(CommandEnvironment & env) {
-  char * ssid = env.args.getCmdParam(1);
-  char * password = env.args.getCmdParam(2);
-  preferences.begin("main",false);
-  preferences.putString("ssid", ssid);
-  preferences.putString("password", password);
-  preferences.end();
-  wifi_task.set_connection_info(ssid, password);
-  env.cout.print("ssid set to \"");
-  env.cout.print(preferences.getString("ssid"));
-  env.cout.print("\", password set to \"");
-  env.cout.print(preferences.getString("password"));
-  env.cout.print("\"");
-  env.cout.println();
-}
 
 void cmd_set_motor_power(CommandEnvironment & env) {
   double left_power = atof(env.args.getCmdParam(1));
@@ -736,33 +546,9 @@ String get_status_json() {
   return (String)"{\"loop_count\":"+String(loop_count)+"}";
 }
 
-std::vector<Command> commands;
-
-void cmd_help(CommandEnvironment & env) {
-  for(auto command : commands) {
-    env.cout.print(command.name);
-    env.cout.print(": ");
-    env.cout.print(command.helpstring);
-    env.cout.println();
-  }
-}
-Command * get_command_by_name(const char * command_name) {
-  for(auto & command : commands) {
-    if(command.name == command_name) {
-      return &command;
-    }
-  }
-  return nullptr;
-}
-
 
 void setup() {
-  preferences.begin("main", true);
-  wifi_task.set_connection_info(preferences.getString("ssid"), preferences.getString("password"));
-  wifi_task.set_enable(preferences.getBool("enable_wifi"));
-  preferences.end();
-
-  Serial.begin(921600);
+  esp32_common_setup();
   button.init(pin_touch);
   
   left_encoder.init();
@@ -809,8 +595,6 @@ void setup() {
   ledcSetup(right_cmd_rev_pwm_channel, pwm_frequency, pwm_bits);
   ledcAttachPin(pin_right_cmd_rev, right_cmd_rev_pwm_channel);
   commands.reserve(50);
-  commands.emplace_back(Command{"help", cmd_help, "displays list of available commands"});
-  commands.emplace_back(Command{"set_wifi_config", cmd_set_wifi_config});
   commands.emplace_back(Command{"set_enable_wifi", cmd_set_enable_wifi});
   commands.emplace_back(Command{"set_motor_power", cmd_set_motor_power});
   commands.emplace_back(Command{"set_peripheral_power", cmd_set_peripheral_power});
@@ -829,59 +613,8 @@ void setup() {
   set_motor_power(0);
   control_mode = ControlMode::motor_power;
 
-  digitalWrite(pin_oled_rst, LOW);
-  delay(10);
-  digitalWrite(pin_oled_rst, HIGH);
-  delay(100);
-
-
-  // init display before mpu since it initializes shared i2c
-  display.init();
-
   Serial.println("Initializing mpu...");
-  //delay(500);
-  //mpu.enable_interrupts(pin_mpu_interrupt);
-
   mpu.setup();
-  SPIFFS.begin();
-  server.on(
-    "/command",
-    HTTP_POST,
-    // request
-    [](AsyncWebServerRequest * request){
-      Serial.println("got a request");
-      Serial.println(request->contentLength());
-
-      auto params=request->params();
-      for(int i=0;i<params;i++){
-        AsyncWebParameter* p = request->getParam(i);
-        if(p->isPost() && p->name() == "body") {
-          CmdParser parser;
-          String body = p->value();
-
-          parser.parseCmd((char *)body.c_str());
-          auto command = get_command_by_name(parser.getCommand());
-          if(command == nullptr) {
-              request->send(200,"text/plain","command failed");
-          } else {
-              static String output_string;
-              output_string.reserve(500*30);
-              output_string.clear();
-              StringStream output_stream(output_string);
-              CommandEnvironment env(parser, output_stream, output_stream);
-              command->execute(env);
-              if(env.ok) {
-                request->send(200,"text/plain", output_string);
-              } else {
-                request->send(200,"text/plain","command failed");
-              }
-          }
-        }
-        request->send(400,"text/plain","no post body sent");
-      }
-    }
-    );
-  
 
   // set up web server routes
   server.on("/led_on", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -904,7 +637,6 @@ void setup() {
   server.on("/black_box.csv", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(SPIFFS, "/black_box.csv", "text/csv", false, get_variable_value);
   });
-
 
   server.on("/command_line.html", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(SPIFFS, "/command_line.html", "text/html", false, get_variable_value);
@@ -932,9 +664,9 @@ void loop() {
   static unsigned long last_loop_ms = 0;
   unsigned long loop_ms = millis();
 
-  if(every_n_ms(loop_ms, last_loop_ms, 1)) {
-    wifi_task.execute();
+  esp32_common_loop();
 
+  if(every_n_ms(loop_ms, last_loop_ms, 1)) {
     // read the button
     button.execute();
 
